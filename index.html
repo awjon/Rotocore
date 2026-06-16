@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>ROTOCORE — rotating arena</title>
+<style>
+  :root{
+    --red:#ff4d5e; --blue:#3d7bff; --yellow:#ffc233; --green:#39d98a;
+    --ink:#0c1018; --panel:rgba(14,19,30,.78); --line:rgba(255,255,255,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#0a0d14;color:#eef2f8;
+    font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+  #timers{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    display:flex;gap:10px;padding:0 10px;flex-wrap:wrap;justify-content:center}
+  .pip{min-width:128px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:8px 10px 9px;backdrop-filter:blur(6px)}
+  .pip .top{display:flex;align-items:center;gap:7px;font-size:13px;letter-spacing:.3px}
+  .pip .dot{width:11px;height:11px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
+  .pip .nm{font-weight:bold}
+  .pip .tag{margin-left:auto;font-size:10px;opacity:.7}
+  .pip .midrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:3px}
+  .pip .time{font-size:20px;font-weight:bold;font-variant-numeric:tabular-nums;line-height:1.05}
+  .pip .lives{display:flex;gap:4px;line-height:1}
+  .pip .life{font-size:12px;color:currentColor;text-shadow:0 0 6px currentColor;transition:opacity .2s}
+  .pip .life.spent{opacity:.18;text-shadow:none}
+  .pip .bar{height:7px;border-radius:5px;background:rgba(255,255,255,.12);margin-top:7px;overflow:hidden}
+  .pip .fill{height:100%;border-radius:5px;transition:width .12s linear}
+  /* mobile: one tight row of four pips across the top, out of the arena's way */
+  body.touch #timers{top:8px;left:0;right:0;transform:none;width:100%;padding:0 6px;
+    gap:5px;flex-wrap:nowrap}
+  body.touch .pip{flex:1 1 0;min-width:0;padding:5px 7px 6px;border-radius:9px}
+  body.touch .pip .top{font-size:10px;gap:4px}
+  body.touch .pip .dot{width:8px;height:8px}
+  body.touch .pip .tag,body.touch .pip .frost,body.touch .you{display:none}
+  body.touch .pip .midrow{gap:3px}
+  body.touch .pip .time{font-size:13px}
+  body.touch .pip .lives{gap:2px}
+  body.touch .pip .life{font-size:8px}
+  body.touch .pip .bar{height:5px;margin-top:5px}
+  .pip.carrying{box-shadow:0 0 0 2px #bfe9ff, 0 0 18px rgba(150,220,255,.45)}
+  .pip.dead{opacity:.32;filter:grayscale(.7)}
+  .pip .frost{color:#9fe6ff;font-size:11px;display:none}
+  .pip.carrying .frost{display:inline}
+
+  #botleft{position:absolute;left:16px;bottom:14px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:12.5px;
+    line-height:1.55;backdrop-filter:blur(6px);max-width:230px}
+  #botleft b{color:#bfe9ff}
+  kbd{background:#1b2433;border:1px solid #2f3d52;border-bottom-width:2px;border-radius:5px;
+    padding:1px 6px;font-family:inherit;font-size:11px}
+
+  #rotwrap{position:absolute;right:16px;bottom:16px;text-align:center}
+  #rotbtnrow{display:flex;gap:8px}
+  .rotmeter{width:150px;height:9px;border-radius:6px;background:rgba(255,255,255,.12);
+    margin-top:7px;overflow:hidden;border:1px solid var(--line)}
+  .rotmeter .f{height:100%;width:100%;background:linear-gradient(90deg,#ffd23f,#ff8a3f)}
+  #rotlbl{font-size:11px;letter-spacing:1px;opacity:.8;margin-top:5px;text-transform:uppercase}
+
+  #banner{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);
+    font-size:54px;font-weight:900;letter-spacing:3px;color:#fff;opacity:0;
+    text-shadow:0 4px 30px rgba(0,0,0,.6);transition:opacity .15s;text-align:center}
+  #subbanner{position:absolute;top:53%;left:50%;transform:translateX(-50%);font-size:16px;
+    letter-spacing:2px;opacity:0;transition:opacity .2s;color:#cfe2ff}
+
+  #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;
+    box-shadow:inset 0 0 220px 40px rgba(255,170,40,.55)}
+
+  /* ---------- Overlays ---------- */
+  .screen{position:fixed;inset:0;z-index:40;display:flex;overflow-y:auto;
+    background:radial-gradient(120% 120% at 50% 20%,#16203a 0%,#070a12 70%);text-align:center;
+    pointer-events:auto}
+  .card{max-width:620px;margin:auto;padding:34px 40px 38px;background:rgba(12,17,28,.72);
+    border:1px solid var(--line);border-radius:20px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  h1{font-size:62px;font-weight:900;letter-spacing:6px;
+    background:linear-gradient(90deg,#ff4d5e,#ffc233 40%,#39d98a 70%,#3d7bff);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#8fa6c4;margin-top:4px}
+  .blurb{font-size:14.5px;line-height:1.7;color:#c7d4e6;margin:18px auto 6px;max-width:520px}
+  .rules{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;font-size:13px;color:#aebfd6;
+    text-align:left;margin:18px auto 4px;max-width:500px}
+  .rules div{display:flex;gap:8px}.rules .i{color:#ffc233}
+  .difficulty{display:flex;gap:8px;justify-content:center}
+  .diff{padding:9px 16px;border-radius:11px;border:1px solid var(--line);background:#121a2b;
+    cursor:pointer;font-size:13px;letter-spacing:1px;transition:.15s;color:#cdd;white-space:nowrap}
+  .diff:hover{border-color:#3d7bff;color:#fff}
+  .diff.on{background:#1d2c4d;border-color:#6ea0ff;color:#fff;box-shadow:0 0 16px rgba(80,140,255,.4)}
+  .setuprow{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin:4px 0 2px}
+  #seedinput{flex:1 1 180px;max-width:240px;min-width:150px;text-align:center;text-transform:uppercase;
+    letter-spacing:3px;font-weight:bold;font-size:16px;font-family:inherit;color:#ffd23f;background:#0f1726;
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
+  #seedinput::placeholder{color:#5a6b82;letter-spacing:.6px;font-weight:normal;font-size:12.5px;text-transform:none}
+  #seedinput:focus{border-color:#ffd23f;box-shadow:0 0 14px rgba(255,180,40,.3)}
+  .play{margin-top:16px;margin-bottom:14px;padding:15px 50px;font-size:20px;font-weight:bold;letter-spacing:2px;
+    border:none;border-radius:13px;cursor:pointer;color:#06101e;
+    background:linear-gradient(90deg,#ffd23f,#ff8a3f);box-shadow:0 10px 30px rgba(255,150,40,.4)}
+  .play:hover{filter:brightness(1.08)}
+  .ctrlkeys{font-size:12.5px;color:#90a2bd;margin-top:14px;letter-spacing:.5px}
+  #endsub{font-size:16px;color:#cfe2ff;letter-spacing:1px;margin-top:8px}
+  #spectate{position:fixed;top:50%;left:50%;transform:translateX(-50%);z-index:30;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;
+    display:none;align-items:center;gap:14px;pointer-events:auto;backdrop-filter:blur(6px)}
+  #spectate button{pointer-events:auto;background:#1d2c4d;border:1px solid #6ea0ff;color:#fff;
+    border-radius:9px;padding:7px 14px;cursor:pointer;font-family:inherit;font-size:13px}
+  #loading{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    background:#070a12;color:#8fa6c4;letter-spacing:3px;font-size:14px}
+  .hidden{display:none!important}
+  /* ---------- touch controls ---------- */
+  #touchui{display:none}
+  #touchpad{position:fixed;inset:0;z-index:15;touch-action:none}
+  #stick{position:fixed;width:120px;height:120px;border-radius:50%;border:2px solid rgba(190,220,255,.22);
+    background:rgba(180,210,255,.06);transform:translate(-50%,-50%);display:none;pointer-events:none;z-index:16}
+  #sticknub{position:absolute;left:50%;top:50%;width:54px;height:54px;border-radius:50%;
+    background:rgba(190,225,255,.42);box-shadow:0 0 18px rgba(150,200,255,.5);transform:translate(-50%,-50%)}
+  #pushbtn{position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    width:108px;height:108px;border-radius:50%;border:3px solid rgba(255,255,255,.55);
+    background:radial-gradient(circle at 50% 38%, #ff7a84, #c92d3a);color:#fff;font-weight:900;
+    letter-spacing:1.5px;font-size:18px;font-family:inherit;z-index:18;pointer-events:auto;
+    display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;touch-action:none;
+    box-shadow:0 8px 22px rgba(0,0,0,.45), inset 0 2px 10px rgba(255,255,255,.35)}
+  #pushbtn.active{transform:translateX(-50%) scale(.9);filter:brightness(1.15)}
+  body.touch #botleft{display:none}                 /* keyboard hints irrelevant on touch */
+  body.touch #rotwrap{display:none}                 /* hide rotation meter/label on mobile */
+  @media (max-width:560px){
+    h1{font-size:40px}
+    .card{padding:22px 20px 24px}
+    .blurb{font-size:13.5px;line-height:1.6;margin:14px auto 4px}
+    .rules{grid-template-columns:1fr;gap:6px 0;font-size:12.5px}
+    .play{padding:14px 40px;font-size:18px}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud" class="hidden">
+  <div id="timers"></div>
+  <div id="botleft">
+    <b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> &nbsp; <b>Jump</b> <kbd>Space</kbd><br>
+    <b>Push</b> <kbd>Shift</kbd> &nbsp; <b>Rotate</b> run into a <span style="color:#ffd23f">glowing side wall</span><br>
+    <span style="opacity:.75">Hold the core to freeze your clock. Deliver it to <b>your</b> floor base to gain time — or an enemy's to drain theirs.</span><br>
+    <span style="opacity:.6">Stage <b id="hudseed" style="color:#ffd23f;letter-spacing:1px">----</b></span>
+  </div>
+  <div id="rotwrap">
+    <div class="rotmeter"><div class="f" id="rotfill"></div></div>
+    <div id="rotlbl">rotation ready</div>
+  </div>
+  <div id="banner"></div>
+  <div id="subbanner"></div>
+  <div id="vignette"></div>
+</div>
+
+<div id="spectate">
+  <span>You're out — watching the finish.</span>
+  <button id="skipbtn">Skip ▶▶</button>
+</div>
+
+<!-- Start screen -->
+<div id="start" class="screen">
+  <div class="card">
+    <h1>ROTOCORE</h1>
+    <div class="tagline">rotate the room · steal the core · outlast everyone</div>
+    <p class="blurb">Four rivals share a tumbling chamber. You die if you run out of time. Grab the glowing
+      core to freeze your timer, bank time at your base or drain time at an enemy's base.
+      Three lives each — last player standing wins.</p>
+    <div class="rules">
+      <div><span class="i">◆</span><span>Carrying core freezes your timer while everyone else keeps ticking.</span></div>
+      <div><span class="i">↻</span><span>Run to a glowing wall to roll the chamber and everyone tumbles</span></div>
+      <div><span class="i">⤓</span><span>Your base: +25s &nbsp;·&nbsp; enemy base: −20s to them</span></div>
+      <div><span class="i">☠</span><span>Lose a life at 0:00 — 3 lives each, last player standing wins</span></div>
+      <div><span class="i">⇄</span><span>Push staggers foes &amp; steals the core</span></div>
+      <div><span class="i">⤒</span><span>Jump to dodge — airborne players can't be pushed</span></div>
+    </div>
+    <button class="play" id="playbtn">ENTER THE CHAMBER</button>
+    <div class="setuprow">
+      <div class="difficulty" id="diffrow">
+        <div class="diff" data-d="easy">ROOKIE</div>
+        <div class="diff on" data-d="normal">RIVAL</div>
+        <div class="diff" data-d="hard">RUTHLESS</div>
+      </div>
+      <input id="seedinput" type="text" maxlength="12" placeholder="STAGE CODE: blank = random" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="ctrlkeys">WASD move · Space jump · Shift push · run into a glowing side wall to rotate</div>
+  </div>
+</div>
+
+<!-- End screen -->
+<div id="end" class="screen hidden">
+  <div class="card">
+    <h1 id="endtitle">VICTORY</h1>
+    <div id="endsub"></div>
+    <div id="endseed" style="font-size:13px;color:#9fb0c8;margin-top:14px;letter-spacing:.5px"></div>
+    <button class="play" id="againbtn" style="margin-top:20px">PLAY AGAIN</button>
+  </div>
+</div>
+
+<!-- Touch controls (mobile, portrait) — shown only on touch devices during play -->
+<div id="touchui">
+  <div id="touchpad"></div>
+  <div id="stick"><div id="sticknub"></div></div>
+  <button id="pushbtn">PUSH</button>
+</div>
+
+<div id="loading">BUILDING THE CHAMBER…</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* =========================================================================
+   ROTOCORE — a Blast-Chamber–style rotating arena brawler.
+   One human (RED) vs three AI. Hold the core to freeze your clock; roll the
+   room so your base is the floor and bank time; push to steal. Last alive wins.
+   ========================================================================= */
+
+const CFG = {
+  TUBE_HALF: 15,          // half cross-section (room is 30 wide/high)
+  TUBE_LEN_HALF: 22,      // half length along Z (end caps fixed)
+  CEIL_Y: 30,
+  GRAV: -42,
+  MOVE: 11,
+  CARRY_MOVE_MULT: 0.88,
+  JUMP_V: 15,
+  P_RADIUS: 0.78,
+  P_HEIGHT: 1.9,
+  STEP_UP: 0.55,          // can walk up ledges this short; taller need a jump
+  PUSH_RANGE: 3.4,
+  PUSH_DOT: 0.45,
+  PUSH_KNOCK: 76,
+  PUSH_STAGGER: 0.8,
+  PUSH_CD: 0.55,
+  ROLL_DUR: 1.3,
+  ROLL_CD: 4.0,
+  TUMBLE_STUN: 0.7,
+  START_TIME: 60,
+  LIVES: 3,
+  SCORE_OWN: 25,
+  SCORE_ENEMY: 20,
+  PICKUP_R: 1.7,
+  SCORE_R: 3.6,
+  CRYSTAL_RESPAWN: 1.1,
+};
+
+const TEAMS = [
+  { name:'RED',    hex:0xff4d5e, css:'#ff4d5e' },
+  { name:'AZURE',  hex:0x3d7bff, css:'#3d7bff' },
+  { name:'AMBER',  hex:0xffc233, css:'#ffc233' },
+  { name:'JADE',   hex:0x39d98a, css:'#39d98a' },
+];
+// cross-section angle (around +Z, measured so 0 = +X) where each team's base sits.
+// -90° (pointing -Y) is "the floor". We place 4 bases at the 4 cardinal faces.
+const BASE_ANGLES = [0, Math.PI/2, Math.PI, -Math.PI/2]; // red(0)=floor, azure=right, amber=ceiling, jade=left
+
+/* ----------------------- seeded stage generation ----------------------- */
+// Short, typeable stage codes (e.g. "K3F9") drive deterministic obstacle layouts.
+// Ambiguous characters (0/O, 1/I/L) are left out of the random alphabet.
+const SEED_ALPHABET='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function randomSeedCode(){ let s=''; for(let i=0;i<4;i++) s+=SEED_ALPHABET[Math.floor(Math.random()*SEED_ALPHABET.length)]; return s; }
+function codeToSeedNum(code){           // FNV-1a hash → uint32
+  let h=2166136261>>>0;
+  for(let i=0;i<code.length;i++){ h^=code.charCodeAt(i); h=Math.imul(h,16777619); }
+  return h>>>0;
+}
+function mulberry32(a){                  // tiny deterministic PRNG
+  return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; };
+}
+let currentSeedCode='';
+
+/* ----------------------------- tiny audio ----------------------------- */
+const Audio = (()=>{
+  let ctx=null, master=null;
+  function ensure(){ if(ctx) return; ctx=new (window.AudioContext||window.webkitAudioContext)();
+    master=ctx.createGain(); master.gain.value=0.5; master.connect(ctx.destination); }
+  function tone(f,dur,type='sine',vol=0.3,slideTo=null){
+    if(!ctx) return; const t=ctx.currentTime;
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,t+dur);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+  }
+  function noise(dur,vol=0.3){
+    if(!ctx) return; const t=ctx.currentTime;
+    const n=ctx.createBufferSource();
+    const buf=ctx.createBuffer(1,ctx.sampleRate*dur,ctx.sampleRate);
+    const d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
+    n.buffer=buf; const g=ctx.createGain(); g.gain.value=vol;
+    const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1200;
+    n.connect(f); f.connect(g); g.connect(master); n.start();
+  }
+  return {
+    resume(){ ensure(); if(ctx.state==='suspended') ctx.resume(); },
+    klaxon(){ ensure(); tone(420,0.18,'square',0.22); setTimeout(()=>tone(330,0.22,'square',0.2),140); },
+    slam(){ ensure(); noise(0.22,0.35); tone(140,0.2,'sawtooth',0.25,70); },
+    jump(){ ensure(); tone(520,0.12,'triangle',0.18,720); },
+    land(){ ensure(); tone(180,0.09,'sine',0.16,120); },
+    push(){ ensure(); noise(0.1,0.3); tone(110,0.12,'square',0.2); },
+    pickup(){ ensure(); tone(660,0.08,'triangle',0.2,990); setTimeout(()=>tone(990,0.1,'triangle',0.18),70); },
+    scoreUp(){ ensure(); [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.16,'triangle',0.22),i*70)); },
+    scoreDown(){ ensure(); [440,330,247].forEach((f,i)=>setTimeout(()=>tone(f,0.18,'sawtooth',0.2),i*80)); },
+    tick(){ ensure(); tone(900,0.05,'square',0.12); },
+    out(){ ensure(); [330,247,165].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'sawtooth',0.2),i*120)); },
+    win(){ ensure(); [523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'triangle',0.25),i*120)); },
+  };
+})();
+
+/* ----------------------------- renderer ----------------------------- */
+const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints||0) > 0;
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:!IS_TOUCH, powerPreference:'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, IS_TOUCH ? 1.5 : 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1726);
+scene.fog = new THREE.Fog(0x0e1726, 55, 110);
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0, 34, 40);
+camera.up.set(0,1,0);
+
+/* ----------------------------- lights ----------------------------- */
+const hemi = new THREE.HemisphereLight(0xbcd2ff, 0x2a2030, 0.85);
+scene.add(hemi);
+
+const key = new THREE.DirectionalLight(0xfff1d8, 2.0);
+key.position.set(26, 46, 20);
+key.castShadow = true;
+key.shadow.mapSize.set(IS_TOUCH ? 1024 : 2048, IS_TOUCH ? 1024 : 2048);
+key.shadow.camera.left = -36; key.shadow.camera.right = 36;
+key.shadow.camera.top = 40; key.shadow.camera.bottom = -10;
+key.shadow.camera.near = 1; key.shadow.camera.far = 130;
+key.shadow.bias = -0.0006;
+key.shadow.normalBias = 0.02;
+scene.add(key);
+scene.add(key.target); key.target.position.set(0,4,0);
+
+const fill = new THREE.DirectionalLight(0x6f8dff, 0.45);
+fill.position.set(-24, 18, -18);
+scene.add(fill);
+
+/* ----------------------------- textures ----------------------------- */
+function makeFloorTexture(baseHex, trimHex){
+  const c=document.createElement('canvas'); c.width=c.height=512; const x=c.getContext('2d');
+  const b='#'+baseHex.toString(16).padStart(6,'0');
+  const tr='#'+trimHex.toString(16).padStart(6,'0');
+  x.fillStyle=b; x.fillRect(0,0,512,512);
+  // panel grid
+  x.strokeStyle='rgba(0,0,0,.28)'; x.lineWidth=4;
+  for(let i=0;i<=8;i++){ const p=i*64; x.beginPath();x.moveTo(p,0);x.lineTo(p,512);x.stroke();
+    x.beginPath();x.moveTo(0,p);x.lineTo(512,p);x.stroke(); }
+  // subtle panel shading
+  for(let gy=0;gy<8;gy++)for(let gx=0;gx<8;gx++){
+    if((gx+gy)%2===0){ x.fillStyle='rgba(255,255,255,.04)'; x.fillRect(gx*64+3,gy*64+3,58,58); }
+    else { x.fillStyle='rgba(0,0,0,.07)'; x.fillRect(gx*64+3,gy*64+3,58,58); }
+    // rivets
+    x.fillStyle='rgba(0,0,0,.25)';
+    [[10,10],[54,10],[10,54],[54,54]].forEach(([rx,ry])=>{x.beginPath();x.arc(gx*64+rx,gy*64+ry,2.6,0,7);x.fill();});
+  }
+  // team trim border
+  x.strokeStyle=tr; x.lineWidth=10; x.strokeRect(6,6,500,500);
+  x.fillStyle=tr; x.globalAlpha=.85;
+  for(let i=0;i<8;i++){ x.fillRect(i*64+24,2,28,8); x.fillRect(i*64+24,502,28,8); }
+  x.globalAlpha=1;
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
+  return tex;
+}
+function makeWallTexture(){
+  const c=document.createElement('canvas'); c.width=c.height=512; const x=c.getContext('2d');
+  x.fillStyle='#1d2738'; x.fillRect(0,0,512,512);
+  x.strokeStyle='rgba(0,0,0,.3)'; x.lineWidth=3;
+  for(let i=0;i<=8;i++){ const p=i*64; x.beginPath();x.moveTo(p,0);x.lineTo(p,512);x.stroke();
+    x.beginPath();x.moveTo(0,p);x.lineTo(512,p);x.stroke(); }
+  for(let gy=0;gy<8;gy++)for(let gx=0;gx<8;gx++){
+    x.fillStyle=(gx+gy)%2===0?'rgba(255,255,255,.03)':'rgba(0,0,0,.08)';
+    x.fillRect(gx*64+2,gy*64+2,60,60);
+  }
+  x.strokeStyle='rgba(120,160,220,.18)'; x.lineWidth=6;
+  for(let i=1;i<8;i+=3){ x.beginPath();x.moveTo(i*64,0);x.lineTo(i*64,512);x.stroke(); }
+  const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(2.2,3.2);
+  return tex;
+}
+const wallTex = makeWallTexture();
+
+/* ----------------------------- chamber ----------------------------- */
+// chamber spins around Z. Children: 4 decorated faces (each with base + obstacles).
+const chamber = new THREE.Group();
+chamber.position.set(0, 15, 0);   // pivot on the tube's central axis; rolls cycle the 4 faces
+scene.add(chamber);
+
+const H = CFG.TUBE_HALF;     // 15
+const L = CFG.TUBE_LEN_HALF; // 22
+const faceLen = L*2;         // 44
+const faceWide = H*2;        // 30
+
+// store per-face data; each face has a "down" local angle so we can find the floor face
+const faces = [];   // {group, owner, anchor, obsGroup, obstacles:[{mesh,hx,hy,hz}], glow, arrow, ...}
+
+function buildFace(teamIndex, angle){
+  const team = TEAMS[teamIndex];
+  const g = new THREE.Group();
+  // Position the face panel as a wall of the tube, oriented so its surface faces inward.
+  // We build each face in its own local frame where +Y is "up away from panel", panel at y=0,
+  // then rotate the whole group by `angle` around Z and push it out to the tube radius.
+  const inner = new THREE.Group();
+  g.add(inner);
+
+  // panel slab
+  const floorTex = makeFloorTexture(0x29313f, team.hex);
+  floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2.0,2.9);
+  const panelMat = new THREE.MeshStandardMaterial({ map:floorTex, roughness:0.85, metalness:0.15 });
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(faceWide, 1.2, faceLen), panelMat);
+  panel.position.y = -0.6; panel.receiveShadow = true; panel.castShadow=false;
+  inner.add(panel);
+
+  // base pad: glowing ring + pillar of light + emblem
+  const baseGrp = new THREE.Group();
+  const padMat = new THREE.MeshStandardMaterial({ color:team.hex, emissive:team.hex,
+    emissiveIntensity:0.6, roughness:0.4, metalness:0.3 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.34, 14, 40), padMat);
+  ring.rotation.x = Math.PI/2; ring.position.y = 0.18; ring.castShadow=true; baseGrp.add(ring);
+  const innerPad = new THREE.Mesh(new THREE.CylinderGeometry(2.3,2.3,0.16,40),
+    new THREE.MeshStandardMaterial({ color:0x101521, emissive:team.hex, emissiveIntensity:0.18, roughness:0.6 }));
+  innerPad.position.y=0.09; innerPad.receiveShadow=true; baseGrp.add(innerPad);
+  // hologram beam
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.6,2.1,9,28,1,true),
+    new THREE.MeshBasicMaterial({ color:team.hex, transparent:true, opacity:0.10, side:THREE.DoubleSide,
+      depthWrite:false }));
+  beam.position.y=4.6; baseGrp.add(beam);
+  // floating diamond emblem
+  const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7),
+    new THREE.MeshStandardMaterial({ color:team.hex, emissive:team.hex, emissiveIntensity:0.9, roughness:0.3 }));
+  emblem.position.y=2.0; emblem.castShadow=true; baseGrp.add(emblem);
+  inner.add(baseGrp);
+
+  // anchor used to detect floor & score position
+  const anchor = new THREE.Object3D(); anchor.position.set(0,0.2,0); inner.add(anchor);
+
+  // obstacles are generated per-match from the stage seed into this group (see regenerateObstacles)
+  // all obstacles use the team/base colour for visibility; climbable tops get a brighter cap
+  const trimMat = new THREE.MeshStandardMaterial({ color:team.hex, emissive:team.hex,
+    emissiveIntensity:0.34, roughness:0.5, metalness:0.25 });
+  const capMat = new THREE.MeshStandardMaterial({ color:team.hex, emissive:team.hex,
+    emissiveIntensity:0.75, roughness:0.35, metalness:0.2 });
+  const obsGroup = new THREE.Group(); inner.add(obsGroup);
+  const obstacles=[];
+
+  // rotation cue — full-panel glow + circular arrow, surfaced only when this face is a side wall
+  const glowMat=new THREE.MeshBasicMaterial({ color:0xffd23f, transparent:true, opacity:0.0,
+    blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide });
+  const glow=new THREE.Mesh(new THREE.PlaneGeometry(faceWide-1.4, faceLen-1.4), glowMat);
+  glow.rotation.x=-Math.PI/2; glow.position.y=0.12; glow.visible=false; inner.add(glow);
+  const arrow=makeRotArrow(0xfff2c0); arrow.position.y=0.3; arrow.visible=false; inner.add(arrow);
+  const arrowMat=arrow.userData.mat;
+
+  // orient & place this face on the tube
+  g.rotation.z = angle;
+  // push panel outward so its top surface sits at radius H from center
+  // local +Y is outward-from-panel = inward to tube after we offset by -H along that axis.
+  inner.position.y = -H; // panel surface ends up at distance H from center → forms the tube wall
+  g.userData = { teamIndex };
+  chamber.add(g);
+
+  faces.push({ group:g, inner, owner:teamIndex, anchor, baseMesh:baseGrp, emblem, ring, beam, panel,
+               obstacles, obsGroup, trimMat, capMat, dirAngle:angle, glow, glowMat, arrow, arrowMat });
+}
+for(let i=0;i<4;i++) buildFace(i, BASE_ANGLES[i]);
+
+/* ----------------------- obstacle layout generator -----------------------
+   Each face gets its own layout drawn from the shared seeded RNG (consumed in
+   face order, then one draw for the starting orientation), so a code fully
+   reproduces a stage. Composition (counts) stays fixed for balance; positions,
+   sizes, and a couple of optional pieces vary. */
+const PLACE_HX = H-2.5, PLACE_HZ = L-2.5, CENTER_CLEAR = 5.0;
+function genFaceLayout(rng){
+  const specs=[], placed=[];
+  function fits(px,pz,sx,sz){
+    if(Math.hypot(px,pz) < CENTER_CLEAR + Math.max(sx,sz)/2) return false; // keep the base clear
+    const ax0=px-sx/2-0.8, ax1=px+sx/2+0.8, az0=pz-sz/2-0.8, az1=pz+sz/2+0.8;
+    if(ax0<-PLACE_HX||ax1>PLACE_HX||az0<-PLACE_HZ||az1>PLACE_HZ) return false;
+    for(const a of placed){ if(ax0<a.x1&&ax1>a.x0&&az0<a.z1&&az1>a.z0) return false; }
+    return true;
+  }
+  function place(kind,sx,sy,sz){
+    for(let t=0;t<48;t++){
+      const px=(rng()*2-1)*PLACE_HX, pz=(rng()*2-1)*PLACE_HZ;
+      if(fits(px,pz,sx,sz)){
+        placed.push({x0:px-sx/2,x1:px+sx/2,z0:pz-sz/2,z1:pz+sz/2});
+        specs.push({kind,px,pz,sx,sy,sz}); return;
+      }
+    }
+  }
+  // fixed composition (keeps difficulty consistent), seeded sizes/positions
+  place('platform', 3.4+rng()*1.8, 1.3+rng()*0.4, 3.4+rng()*1.8);
+  place('platform', 3.0+rng()*1.6, 1.3+rng()*0.4, 3.0+rng()*1.6);
+  const pillars = 1 + (rng()<0.5?1:0);
+  for(let i=0;i<pillars;i++){ const s=1.8+rng()*0.8; place('pillar', s, 3.6+rng()*1.3, s); }
+  const crates = 2 + (rng()<0.55?1:0);
+  for(let i=0;i<crates;i++){ const s=1.6+rng()*0.8; place('crate', s, s, s); }
+  if(rng()<0.7){ place('bench', 1.4+rng()*0.6, 1.0+rng()*0.3, 4+rng()*2); } // optional long bench
+  return specs;
+}
+function buildObstacle(face, spec){
+  const climb = (spec.kind==='platform'||spec.kind==='bench');
+  const m=new THREE.Mesh(new THREE.BoxGeometry(spec.sx,spec.sy,spec.sz), face.trimMat); // team-coloured for visibility
+  m.position.set(spec.px, spec.sy/2, spec.pz); m.castShadow=true; m.receiveShadow=true;
+  face.obsGroup.add(m);
+  if(climb){ // brighter cap so jump-up surfaces read clearly (still the base colour)
+    const cap=new THREE.Mesh(new THREE.BoxGeometry(spec.sx*1.02,0.18,spec.sz*1.02), face.capMat);
+    cap.position.set(spec.px, spec.sy+0.04, spec.pz); face.obsGroup.add(cap);
+  }
+  face.obstacles.push({ mesh:m, hx:spec.sx/2, hy:spec.sy/2, hz:spec.sz/2 });
+}
+function clearObstacles(face){
+  for(const c of face.obsGroup.children){ if(c.geometry) c.geometry.dispose(); }
+  face.obsGroup.clear();
+  face.obstacles.length=0;
+}
+// Build all four faces' obstacles from a code; returns the starting rotation index (0-3).
+function applyStageSeed(code){
+  currentSeedCode = code;
+  const rng = mulberry32(codeToSeedNum(code));
+  for(const f of faces){
+    clearObstacles(f);
+    for(const spec of genFaceLayout(rng)) buildObstacle(f, spec);
+  }
+  return Math.floor(rng()*4); // starting floor, also part of the seed for full reproducibility
+}
+
+// far end cap: solid backdrop for depth (camera always views from +Z side)
+const capMat = new THREE.MeshStandardMaterial({ map:wallTex, roughness:0.9, metalness:0.1, side:THREE.DoubleSide });
+const farCap=new THREE.Mesh(new THREE.PlaneGeometry(faceWide+2, faceWide+2), capMat);
+farCap.position.set(0,H,-(L+0.2)); farCap.receiveShadow=true; scene.add(farCap);
+// near end: open frame (so it doesn't occlude the view), reads as the room's rim
+const frameMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4});
+const frameTopMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4,
+  transparent:true, opacity:0.25, depthWrite:false});   // top rim see-through like the ceiling
+function frameBar(px,py,sx,sy,mat){ const b=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,1.0), mat||frameMat);
+  b.position.set(px,py,L+0.2); b.castShadow=!(mat&&mat.transparent); scene.add(b); }
+frameBar(0,0.6,faceWide+2,1.2);                          // bottom rim
+frameBar(0,(H*2)-0.6,faceWide+2,1.2, frameTopMat);       // top rim — transparent, nearest the camera
+frameBar(-(H+0.6),H,1.2,faceWide); frameBar(H+0.6,H,1.2,faceWide);
+
+/* --------- rotation cue: a circular "rotate" arrow decal (laid flat on a panel) --------- */
+function makeRotArrow(color){
+  const mat=new THREE.MeshStandardMaterial({ color, emissive:color, emissiveIntensity:1.0,
+    roughness:0.4, metalness:0.2, side:THREE.DoubleSide });
+  const g=new THREE.Group();
+  const R=3.2, arc=Math.PI*1.15;
+  g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.34,12,48,arc), mat));
+  const head=new THREE.Mesh(new THREE.ConeGeometry(0.98,1.9,16), mat);
+  head.position.set(Math.cos(arc)*R, Math.sin(arc)*R, 0);
+  head.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),
+    new THREE.Vector3(-Math.sin(arc),Math.cos(arc),0).normalize());
+  g.add(head);
+  const tail=new THREE.Mesh(new THREE.SphereGeometry(0.5,12,10), mat); tail.position.set(R,0,0); g.add(tail);
+  g.rotation.x=-Math.PI/2;        // lay flat in the panel plane (surface normal +Y in face-local)
+  g.userData.mat=mat;
+  return g;
+}
+
+/* ----------------------------- crystal (core) ----------------------------- */
+const crystalMat = new THREE.MeshStandardMaterial({ color:0x8ff0ff, emissive:0x35d6ff,
+  emissiveIntensity:1.2, roughness:0.15, metalness:0.2 });
+const crystal = new THREE.Group();
+const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.85, 0), crystalMat);
+core.castShadow=true; crystal.add(core);
+const halo = new THREE.Mesh(new THREE.OctahedronGeometry(1.25,0),
+  new THREE.MeshBasicMaterial({color:0x9ff4ff, transparent:true, opacity:0.18, depthWrite:false}));
+crystal.add(halo);
+const crystalLight = new THREE.PointLight(0x4fdcff, 2.4, 22, 2.0);
+crystal.add(crystalLight);
+scene.add(crystal);
+
+const Core = {
+  group:crystal, carrier:null, pos:new THREE.Vector3(0,1.2,0), vel:new THREE.Vector3(),
+  respawnT:0, free:true,
+};
+function respawnCore(){
+  Core.carrier=null; Core.free=true; Core.respawnT=0;
+  // scatter anywhere across the floor, but keep clear of the active base (always near x=0,z=0)
+  let x,z,tries=0;
+  do {
+    x=(Math.random()*2-1)*(H-2.5);
+    z=(Math.random()*2-1)*(L-2.5);
+    tries++;
+  } while (Math.hypot(x,z) < CFG.SCORE_R+2.2 && tries<24);
+  Core.pos.set(x, 8, z);
+  Core.vel.set((Math.random()*2-1)*2.5, 0, (Math.random()*2-1)*2.5);
+  scene.attach(crystal);
+  crystal.position.copy(Core.pos);
+}
+respawnCore();
+
+/* ----------------------------- player factory ----------------------------- */
+function buildAvatar(team){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.62,0.9,8,18),
+    new THREE.MeshStandardMaterial({color:team.hex, roughness:0.55, metalness:0.15}));
+  body.position.y=1.05; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  // belly plate (lighter)
+  const belly=new THREE.Mesh(new THREE.SphereGeometry(0.5,16,14),
+    new THREE.MeshStandardMaterial({color:0xf2f5fb, roughness:0.5}));
+  belly.scale.set(0.9,1.0,0.55); belly.position.set(0,0.95,0.42); g.add(belly);
+  // head
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.46,18,16),
+    new THREE.MeshStandardMaterial({color:0x232a38, roughness:0.4, metalness:0.3}));
+  head.position.y=1.95; head.castShadow=true; g.add(head);
+  // visor (shows facing) — bright cyan band on the front
+  const visor=new THREE.Mesh(new THREE.BoxGeometry(0.66,0.2,0.18),
+    new THREE.MeshStandardMaterial({color:0x9ff4ff, emissive:0x35d6ff, emissiveIntensity:1.0, roughness:0.3}));
+  visor.position.set(0,1.97,0.4); g.add(visor);
+  // fin on top (team color, reads direction from above)
+  const fin=new THREE.Mesh(new THREE.ConeGeometry(0.2,0.7,4),
+    new THREE.MeshStandardMaterial({color:team.hex, emissive:team.hex, emissiveIntensity:0.4, roughness:0.4}));
+  fin.position.set(0,2.5,-0.05); fin.rotation.x=0.15; g.add(fin);
+  // feet
+  const footMat=new THREE.MeshStandardMaterial({color:0x232a38, roughness:0.6});
+  [-0.3,0.3].forEach(sx=>{ const f=new THREE.Mesh(new THREE.SphereGeometry(0.28,12,10),footMat);
+    f.scale.set(1,0.6,1.3); f.position.set(sx,0.22,0.05); f.castShadow=true; g.add(f); });
+  // ground contact ring (readability)
+  const ringMat=new THREE.MeshBasicMaterial({color:team.hex, transparent:true, opacity:0.5, depthWrite:false});
+  const cring=new THREE.Mesh(new THREE.RingGeometry(0.72,0.95,28), ringMat);
+  cring.rotation.x=-Math.PI/2; cring.position.y=0.03; g.add(cring);
+  // hand anchor for carried core
+  const hand=new THREE.Object3D(); hand.position.set(0,2.7,0.1); g.add(hand);
+
+  scene.add(g);
+  return { g, body, head, visor, fin, hand, cring };
+}
+
+const players = [];
+const SPAWN_SPOTS=[ new THREE.Vector3(-8,0,-8), new THREE.Vector3(8,0,8),
+                    new THREE.Vector3(8,0,-8), new THREE.Vector3(-8,0,8) ];
+function spawnPlayer(teamIndex, isHuman){
+  const team=TEAMS[teamIndex];
+  const av=buildAvatar(team);
+  const p={
+    team:teamIndex, isHuman, name:team.name, av,
+    pos:SPAWN_SPOTS[teamIndex].clone(), vel:new THREE.Vector3(),
+    facing:new THREE.Vector3(0,0, teamIndex<2?1:-1),
+    grounded:true, time:CFG.START_TIME, lives:CFG.LIVES, alive:true,
+    stun:0, pushCd:0, squash:1, pendingTumbleStun:false, reparented:false,
+    aiTick:0, aiTarget:new THREE.Vector3(), aiState:'idle', aiInput:new THREE.Vector2(),
+    aiJump:false, aiPush:false,
+  };
+  av.g.position.copy(p.pos);
+  players.push(p);
+  return p;
+}
+// respawn after losing a life: fresh timer, back to spawn, dropped in upright
+function respawnPlayer(p){
+  p.time=CFG.START_TIME;
+  p.pos.copy(SPAWN_SPOTS[p.team]); p.pos.y=2.2;
+  p.vel.set(0,0,0); p.stun=0; p.grounded=false; p.pendingTumbleStun=false;
+  p.av.g.visible=true; p.av.g.position.copy(p.pos);
+  p.av.g.rotation.set(0, Math.atan2(p.facing.x,p.facing.z), 0);
+}
+
+/* ----------------------------- input ----------------------------- */
+const keys={};
+addEventListener('keydown',e=>{ keys[e.code]=true;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=false; });
+
+/* ----------------------------- rotation system ----------------------------- */
+const Rot = { active:false, t:0, dir:1, startZ:0, targetZ:0, cd:0 };
+
+function floorFace(){
+  // face whose base anchor has lowest world Y
+  let best=null, by=1e9;
+  for(const f of faces){
+    f.anchor.getWorldPosition(_v); if(_v.y<by){ by=_v.y; best=f; }
+  }
+  return best;
+}
+function triggerRoll(dir){
+  if(Rot.active || Rot.cd>0) return;
+  const alive=players.filter(p=>p.alive);
+  Audio.klaxon();
+  // parent all alive players + free core to chamber so they ride the spin
+  for(const p of alive){ chamber.attach(p.av.g); p.reparented=true; }
+  if(Core.free){ chamber.attach(crystal); Core.reparented=true; } else Core.reparented=false;
+  Rot.active=true; Rot.t=0; Rot.dir=dir;
+  Rot.startZ=chamber.rotation.z; Rot.targetZ=chamber.rotation.z + dir*Math.PI/2;
+  showBanner('ROTATING', dir>0?'◄ rolling left':'rolling right ►', 0.0);
+  setVignette(0.8);
+}
+function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+const _v=new THREE.Vector3();
+function updateRoll(dt){
+  if(Rot.cd>0) Rot.cd=Math.max(0,Rot.cd-dt);
+  if(!Rot.active) return;
+  Rot.t += dt/CFG.ROLL_DUR;
+  const tt=easeInOut(Math.min(1,Rot.t));
+  chamber.rotation.z = Rot.startZ + (Rot.targetZ-Rot.startZ)*tt;
+  // camera flavor roll
+  camRoll = Math.sin(Math.min(1,Rot.t)*Math.PI) * Rot.dir * 0.12;
+  if(Rot.t>=1){
+    chamber.rotation.z = Rot.targetZ;
+    chamber.updateMatrixWorld(true);
+    // detach everyone back to world; read resulting world pos as new physics pos
+    for(const p of players){
+      if(!p.reparented) continue;
+      scene.attach(p.av.g);
+      p.pos.copy(p.av.g.position);
+      // stand upright on the new floor — keep facing yaw, drop the spin's pitch/roll
+      const yaw=Math.atan2(p.facing.x, p.facing.z);
+      p.av.g.rotation.set(0, yaw, 0);
+      p.vel.set(0,0,0); p.grounded=false; p.pendingTumbleStun=true; p.reparented=false;
+    }
+    if(Core.reparented){ scene.attach(crystal); Core.pos.copy(crystal.position); Core.vel.set(0,0,0); Core.reparented=false; }
+    Rot.active=false; Rot.cd=CFG.ROLL_CD;
+    camRoll=0; setVignette(0);
+    hideBanner();
+  }
+}
+
+/* ----------------------------- collision helpers ----------------------------- */
+function currentFloorObstacles(){
+  const ff=floorFace();
+  // obstacles whose face is the floor face; compute their world transform (axis-aligned at rest)
+  return ff ? ff.obstacles : [];
+}
+function resolvePlayerCollision(p){
+  const r=CFG.P_RADIUS;
+  // walls (tube is axis-aligned at rest)
+  p.pos.x = Math.max(-H+r, Math.min(H-r, p.pos.x));
+  p.pos.z = Math.max(-L+r, Math.min(L-r, p.pos.z));
+  // ground from floor plane + obstacles
+  let groundY=0;
+  const obs=currentFloorObstacles();
+  for(const ob of obs){
+    ob.mesh.getWorldPosition(_v);
+    const top=_v.y+ob.hy;
+    const dx=Math.abs(p.pos.x-_v.x), dz=Math.abs(p.pos.z-_v.z);
+    const within = dx < ob.hx+r*0.6 && dz < ob.hz+r*0.6;
+    if(within && p.pos.y >= top-0.05) groundY=Math.max(groundY, top);
+  }
+  // horizontal blocking for obstacles taller than step-up under the player's feet
+  for(const ob of obs){
+    ob.mesh.getWorldPosition(_v);
+    const top=_v.y+ob.hy;
+    if(top - p.pos.y <= CFG.STEP_UP) continue;     // short enough to walk over (becomes ground)
+    if(p.pos.y >= top-0.02) continue;              // standing on it / above it
+    const minX=_v.x-ob.hx-r, maxX=_v.x+ob.hx+r;
+    const minZ=_v.z-ob.hz-r, maxZ=_v.z+ob.hz+r;
+    if(p.pos.x>minX && p.pos.x<maxX && p.pos.z>minZ && p.pos.z<maxZ){
+      // push out along least-penetration axis
+      const penL=p.pos.x-minX, penR=maxX-p.pos.x, penB=p.pos.z-minZ, penF=maxZ-p.pos.z;
+      const m=Math.min(penL,penR,penB,penF);
+      if(m===penL) p.pos.x=minX; else if(m===penR) p.pos.x=maxX;
+      else if(m===penB) p.pos.z=minZ; else p.pos.z=maxZ;
+    }
+  }
+  // land / gravity floor
+  if(p.pos.y<=groundY+0.001){
+    if(!p.grounded){ Audio.land();
+      if(p.pendingTumbleStun){ p.stun=Math.max(p.stun,CFG.TUMBLE_STUN); p.pendingTumbleStun=false;
+        p.squash=0.7; } }
+    p.pos.y=groundY; p.vel.y=0; p.grounded=true;
+  } else p.grounded=false;
+}
+
+/* ----------------------------- camera ----------------------------- */
+let camRoll=0;
+const camTarget=new THREE.Vector3();
+function updateCamera(dt){
+  const human=players[0];
+  const focus = (human && human.alive) ? human.pos
+              : (players.find(p=>p.alive)?.pos || new THREE.Vector3());
+  camTarget.lerp(focus, 1-Math.pow(0.001,dt));
+  const portrait = camera.aspect < 1;
+  const back = portrait ? 52 : 34;          // pull back in portrait to keep the wide arena in frame
+  const high = portrait ? 41 : 30;
+  const desired=new THREE.Vector3(camTarget.x*0.5, high, camTarget.z*0.5 + back);
+  camera.position.lerp(desired, 1-Math.pow(0.0008,dt));
+  camera.lookAt(camTarget.x, camTarget.y+3, camTarget.z);
+  camera.rotation.z += camRoll;
+}
+// camera-relative movement basis (projected on floor plane)
+const camFwd=new THREE.Vector3(), camRight=new THREE.Vector3();
+function updateCamBasis(){
+  camera.getWorldDirection(camFwd); camFwd.y=0; camFwd.normalize();
+  camRight.crossVectors(camFwd, new THREE.Vector3(0,1,0)).normalize();
+}
+
+/* ----------------------------- AI ----------------------------- */
+let DIFF='normal';
+const DIFFS={
+  easy:{speed:0.82, pushChance:0.25, dodge:0.15, smartRotate:false, react:0.32},
+  normal:{speed:0.95, pushChance:0.55, dodge:0.45, smartRotate:false, react:0.20},
+  hard:{speed:1.0, pushChance:0.85, dodge:0.8, smartRotate:true, react:0.12},
+};
+const _wp=new THREE.Vector3();
+function ownBaseDownDir(team){
+  // returns +1/-1 for which roll brings this team's base toward floor, or 0 if already down
+  const f=faces[team]; f.anchor.getWorldPosition(_v); const cur=_v.y;
+  if(cur<3) return 0;
+  const z0=chamber.rotation.z;
+  let res=0,best=cur;
+  for(const d of [1,-1]){
+    chamber.rotation.z=z0+d*Math.PI/2; chamber.updateMatrixWorld(true);
+    f.anchor.getWorldPosition(_v);
+    if(_v.y<best){ best=_v.y; res=d; }
+  }
+  chamber.rotation.z=z0; chamber.updateMatrixWorld(true);
+  return res;
+}
+function baseUseful(owner, team){ return owner===team || (owner>=0 && players[owner] && players[owner].alive); }
+// which single roll (+1 left wall / -1 right wall) brings a LIVE base to the floor? own base preferred.
+function rollDirToUsefulBase(p){
+  const z0=chamber.rotation.z;
+  const floorOwnerAfter=(d)=>{
+    chamber.rotation.z=z0+d*Math.PI/2; chamber.updateMatrixWorld(true);
+    let owner=-1, by=1e9;
+    for(const f of faces){ f.anchor.getWorldPosition(_v); if(_v.y<by){ by=_v.y; owner=f.owner; } }
+    return owner;
+  };
+  const plus=floorOwnerAfter(1), minus=floorOwnerAfter(-1);
+  chamber.rotation.z=z0; chamber.updateMatrixWorld(true);
+  if(plus===p.team) return 1;
+  if(minus===p.team) return -1;
+  if(baseUseful(plus,p.team)) return 1;
+  if(baseUseful(minus,p.team)) return -1;
+  return ownBaseDownDir(p.team) || 1;   // only live base is 180° away → keep rotating toward our own
+}
+function aiThink(p){
+  const D=DIFFS[DIFF];
+  p.aiPush=false;
+  const ff=floorFace();
+  const activeOwner = ff ? ff.owner : -1;
+  if(Core.carrier===p){
+    // I'm carrying
+    if(activeOwner===p.team){
+      p.aiState='deliver'; ff.anchor.getWorldPosition(p.aiTarget);          // own base down → bank time
+    } else if(baseUseful(activeOwner, p.team)){
+      // a LIVE enemy base is down: maybe rotate to our own (more value), else dump on them to drain
+      const dir = D.smartRotate ? ownBaseDownDir(p.team) : 0;
+      const wantRotate = (dir!==0) && Rot.cd<=0 && !Rot.active && Math.random()<0.8;
+      if(wantRotate){
+        p.aiState='rotate';
+        p.aiTarget.set(dir>0 ? -(H+6) : (H+6), 0, p.pos.z);
+      } else {
+        p.aiState='deliver'; ff.anchor.getWorldPosition(p.aiTarget);
+      }
+    } else {
+      // floor base belongs to an ELIMINATED player → delivering is wasted; roll to a live base
+      const dir = rollDirToUsefulBase(p);
+      p.aiState='rotate';
+      p.aiTarget.set(dir>0 ? -(H+6) : (H+6), 0, p.pos.z);
+    }
+  } else if(Core.free){
+    p.aiState='seek'; p.aiTarget.copy(Core.pos);
+  } else if(Core.carrier && Core.carrier!==p){
+    const c=Core.carrier;
+    const dist=p.pos.distanceTo(c.pos);
+    if(dist<14 && Math.random()<D.pushChance+0.2){
+      p.aiState='chase'; p.aiTarget.copy(c.pos);
+      if(dist<CFG.PUSH_RANGE*0.92 && p.pushCd<=0) p.aiPush=true;
+    } else {
+      // defend / loiter near center
+      p.aiState='roam'; p.aiTarget.set((Math.random()-0.5)*10,0,(Math.random()-0.5)*12);
+    }
+  } else { p.aiState='roam'; p.aiTarget.set((Math.random()-0.5)*10,0,(Math.random()-0.5)*12); }
+
+  // (jump decisions are handled per-frame in aiDrive)
+}
+function aiDrive(p,dt){
+  const D=DIFFS[DIFF];
+  const dir=new THREE.Vector3().subVectors(p.aiTarget,p.pos); dir.y=0;
+  const dist=dir.length();
+  if(dist>0.5){ dir.normalize(); p.aiInput.set(dir.x,dir.z); }
+  else p.aiInput.set(0,0);
+  p._aiSpeed=D.speed;
+
+  const wantsMove=(Math.abs(p.aiInput.x)+Math.abs(p.aiInput.y))>0.3;
+
+  // --- obstacle handling: detect "stuck" (trying to move but not progressing) ---
+  if(p.grounded && wantsMove){
+    const moved=Math.hypot(p.pos.x-(p._lx ?? p.pos.x), p.pos.z-(p._lz ?? p.pos.z));
+    const expect=CFG.MOVE*p._aiSpeed*dt;
+    if(moved < expect*0.45) p._stuck=(p._stuck||0)+dt; else p._stuck=0;
+  } else p._stuck=0;
+  p._lx=p.pos.x; p._lz=p.pos.z;
+
+  let jump=false;
+  // when stuck, commit to a short "get around it" maneuver: hop AND veer to one side
+  if(p._stuck>0.18){ p._stuck=0; p._avoid=0.45; p._avoidSide=(Math.random()<0.5?1:-1); }
+  if((p._avoid||0)>0){
+    p._avoid-=dt;
+    const a=p._avoidSide*0.95, ix=p.aiInput.x, iz=p.aiInput.y;     // rotate heading ~55° to slip past
+    p.aiInput.set(ix*Math.cos(a)-iz*Math.sin(a), ix*Math.sin(a)+iz*Math.cos(a));
+    if(p.grounded) jump=true;                                       // hop to clear low obstacles
+  }
+  // target sits above me and I'm close → jump up onto it (e.g. a carrier on a platform)
+  if(p.grounded && dist<3.4 && (p.aiTarget.y - p.pos.y) > 1.0) jump=true;
+  // a free core resting up off the floor and I'm going for it → jump to reach it
+  if(p.grounded && Core.free && p.aiState==='seek' && Core.pos.y>1.9 && dist<4.5) jump=true;
+  // dodge an imminent push while I'm the carrier
+  if(p.grounded && Core.carrier===p){
+    for(const e of players){ if(e===p||!e.alive) continue;
+      if(Math.hypot(e.pos.x-p.pos.x, e.pos.z-p.pos.z)<3.0 && Math.random()<D.dodge*dt*9){ jump=true; break; } }
+  }
+  p.aiJump=jump;
+}
+
+/* ----------------------------- core pickup / score / push ----------------------------- */
+function tryPickup(){
+  if(!Core.free) return;
+  for(const p of players){ if(!p.alive) continue;
+    const d=Math.hypot(p.pos.x-Core.pos.x, p.pos.z-Core.pos.z);
+    const dy=Math.abs((p.pos.y+1.2)-Core.pos.y);
+    if(d<CFG.PICKUP_R && dy<2.4){ giveCore(p); return; }
+  }
+}
+function giveCore(p){
+  Core.carrier=p; Core.free=false; Audio.pickup();
+  p.av.hand.add(crystal); crystal.position.set(0,0,0);
+}
+function dropCore(p, impulse){
+  if(Core.carrier!==p) return;
+  scene.attach(crystal);
+  Core.pos.copy(crystal.position);
+  Core.vel.set((Math.random()-0.5)*6,7,(Math.random()-0.5)*6);
+  if(impulse) Core.vel.add(impulse);
+  Core.carrier=null; Core.free=true;
+}
+function tryScore(){
+  if(!Core.carrier) return;
+  const p=Core.carrier; if(!p.grounded) return;
+  const ff=floorFace(); if(!ff) return;
+  ff.anchor.getWorldPosition(_v);
+  if(_v.y>2.0) return; // base not actually on the floor
+  const d=Math.hypot(p.pos.x-_v.x, p.pos.z-_v.z);
+  if(d>CFG.SCORE_R) return;
+  const owner=ff.owner;
+  const target=players[owner];
+  if(owner===p.team){
+    p.time += CFG.SCORE_OWN; Audio.scoreUp();
+    showBanner(`+${CFG.SCORE_OWN}s`, `${TEAMS[p.team].name} banks time`, 0.0, TEAMS[p.team].css);
+    flashBase(ff,0x9fffcf);
+  } else if(target && target.alive){
+    target.time = Math.max(0, target.time - CFG.SCORE_ENEMY); Audio.scoreDown();
+    showBanner(`−${CFG.SCORE_ENEMY}s`, `${TEAMS[p.team].name} drains ${TEAMS[owner].name}`, 0.0, TEAMS[p.team].css);
+    flashBase(ff,0xff7a7a);
+  } else {
+    return;   // base owner is eliminated → no effect; keep the core instead of wasting it
+  }
+  // release core, respawn shortly (only after a valid deposit)
+  scene.attach(crystal); Core.carrier=null; Core.free=false; Core.respawnT=CFG.CRYSTAL_RESPAWN;
+  crystal.visible=false;
+}
+function flashBase(f,color){
+  f.ring.material.emissiveIntensity=2.4;
+  setTimeout(()=>{ if(f.ring) f.ring.material.emissiveIntensity=0.6; },260);
+}
+function doPush(p){
+  if(p.pushCd>0) return;
+  p.pushCd=CFG.PUSH_CD; Audio.push();
+  p.squash=0.85;
+  for(const t of players){ if(t===p||!t.alive) continue;
+    if(!t.grounded) continue;                 // airborne immune
+    const to=new THREE.Vector3(t.pos.x-p.pos.x,0,t.pos.z-p.pos.z);
+    const dist=to.length(); if(dist>CFG.PUSH_RANGE) continue;
+    to.normalize();
+    const face=new THREE.Vector3(p.facing.x,0,p.facing.z).normalize();
+    if(face.dot(to)<CFG.PUSH_DOT) continue;   // must be roughly in front
+    t.vel.x += to.x*CFG.PUSH_KNOCK; t.vel.z += to.z*CFG.PUSH_KNOCK;
+    t.vel.y += 4.5; t.grounded=false;
+    t.stun=Math.max(t.stun,CFG.PUSH_STAGGER);
+    if(Core.carrier===t) giveCore(p);         // pusher steals the core on contact
+  }
+}
+
+/* ----------------------------- player physics & movement ----------------------------- */
+const _move=new THREE.Vector3();
+function updatePlayer(p, dt, inputX, inputZ, jump, push){
+  if(!p.alive) return;
+  if(p.stun>0) p.stun-=dt;
+  if(p.pushCd>0) p.pushCd-=dt;
+
+  const carrying = (Core.carrier===p);
+  const speed = CFG.MOVE * (carrying?CFG.CARRY_MOVE_MULT:1) * (p.isHuman?1:(p._aiSpeed||1));
+  const canControl = p.stun<=0;
+
+  if(canControl && (Math.abs(inputX)>0.01 || Math.abs(inputZ)>0.01)){
+    // inputX/inputZ are a WORLD-space desired direction (caller builds it)
+    _move.set(inputX,0,inputZ);
+    if(_move.lengthSq()>0){
+      _move.normalize();
+      p.vel.x = _move.x*speed; p.vel.z = _move.z*speed;
+      p.facing.set(_move.x,0,_move.z);
+    }
+  } else {
+    // friction
+    p.vel.x *= Math.pow(0.0001,dt); p.vel.z *= Math.pow(0.0001,dt);
+  }
+
+  if(jump && p.grounded && canControl){ p.vel.y=CFG.JUMP_V; p.grounded=false; Audio.jump(); p.squash=1.35; }
+  if(push && canControl) doPush(p);
+
+  // integrate
+  p.vel.y += CFG.GRAV*dt;
+  p.pos.x += p.vel.x*dt;
+  p.pos.y += p.vel.y*dt;
+  p.pos.z += p.vel.z*dt;
+
+  resolvePlayerCollision(p);
+
+  // place avatar
+  p.av.g.position.copy(p.pos);
+  // face toward movement / facing
+  if(p.facing.lengthSq()>0.001){
+    const yaw=Math.atan2(p.facing.x,p.facing.z);
+    let cur=p.av.g.rotation.y;
+    let diff=((yaw-cur+Math.PI)% (Math.PI*2))-Math.PI;
+    p.av.g.rotation.y = cur + diff*Math.min(1,dt*14);
+  }
+  // squash & stretch ease back to 1
+  p.squash += (1-p.squash)*Math.min(1,dt*9);
+  const sq=p.squash;
+  p.av.g.scale.set(1/Math.sqrt(sq), sq, 1/Math.sqrt(sq));
+  // lean forward slightly when moving
+  const moving=Math.hypot(p.vel.x,p.vel.z)>1.5;
+  p.av.body.rotation.x += ((moving?0.18:0) - p.av.body.rotation.x)*Math.min(1,dt*8);
+}
+
+/* ----------------------------- HUD ----------------------------- */
+const timersEl=document.getElementById('timers');
+const pipEls=[];
+function buildHUD(){
+  timersEl.innerHTML='';
+  pipEls.length=0;
+  players.forEach((p,i)=>{
+    const t=TEAMS[p.team];
+    const el=document.createElement('div'); el.className='pip';
+    el.innerHTML=`<div class="top"><span class="dot" style="color:${t.css};background:${t.css}"></span>
+      <span class="nm">${t.name}${p.isHuman?' <span class="you">(you)</span>':''}</span>
+      <span class="frost">❄ frozen</span><span class="tag">${p.isHuman?'':'AI'}</span></div>
+      <div class="midrow"><span class="time" style="color:${t.css}">1:00</span>
+        <span class="lives" style="color:${t.css}"></span></div>
+      <div class="bar"><div class="fill" style="background:${t.css}"></div></div>`;
+    timersEl.appendChild(el);
+    const livesEl=el.querySelector('.lives');
+    const lifeMarks=[];
+    for(let k=0;k<CFG.LIVES;k++){ const s=document.createElement('span');
+      s.className='life'; s.textContent='◆'; livesEl.appendChild(s); lifeMarks.push(s); }
+    pipEls.push({el, time:el.querySelector('.time'), fill:el.querySelector('.fill'), lives:lifeMarks});
+  });
+}
+function fmt(s){ s=Math.max(0,Math.ceil(s)); const m=Math.floor(s/60); const ss=s%60;
+  return m+':'+String(ss).padStart(2,'0'); }
+function updateHUD(){
+  players.forEach((p,i)=>{
+    const e=pipEls[i]; if(!e) return;
+    e.time.textContent=fmt(p.time);
+    e.fill.style.width=Math.max(0,Math.min(100,(p.time/CFG.START_TIME)*100))+'%';
+    e.el.classList.toggle('carrying', Core.carrier===p);
+    e.el.classList.toggle('dead', !p.alive);
+    if(e.lives){ for(let k=0;k<e.lives.length;k++) e.lives[k].classList.toggle('spent', k>=p.lives); }
+    if(p.time<=10 && p.alive){ e.time.style.opacity=(Math.sin(performance.now()/120)>0?1:0.45); }
+    else e.time.style.opacity=1;
+  });
+  // rotation meter
+  const rf=document.getElementById('rotfill');
+  const lbl=document.getElementById('rotlbl');
+  if(Rot.cd>0){ rf.style.width=(100*(1-Rot.cd/CFG.ROLL_CD))+'%'; lbl.textContent='recharging'; }
+  else { rf.style.width='100%'; lbl.textContent='push a glowing wall'; }
+}
+const bannerEl=document.getElementById('banner');
+const subEl=document.getElementById('subbanner');
+let bannerTimer=0;
+function showBanner(txt, sub, hold, color){
+  bannerEl.textContent=txt; bannerEl.style.color=color||'#fff';
+  subEl.textContent=sub||''; bannerEl.style.opacity=1; subEl.style.opacity=1;
+  bannerTimer=1.1;
+}
+function hideBanner(){ bannerEl.style.opacity=0; subEl.style.opacity=0; }
+const vigEl=document.getElementById('vignette');
+function setVignette(v){ vigEl.style.opacity=v; }
+
+/* ----------------------------- game state ----------------------------- */
+let RUNNING=false, timeScale=1, lowTickAcc=0;
+const clock=new THREE.Clock();
+
+function startGame(){
+  // reset
+  players.length=0;
+  Rot.active=false; Rot.cd=0;
+  // resolve the stage code (blank = fresh random), build its obstacles, get its starting floor
+  const typed=(document.getElementById('seedinput').value||'').trim().toUpperCase();
+  const code = typed.length ? typed : randomSeedCode();
+  const startRot = applyStageSeed(code);
+  chamber.rotation.z = startRot * (Math.PI/2);
+  chamber.updateMatrixWorld(true);
+  const hs=document.getElementById('hudseed'); if(hs) hs.textContent=code;
+  // spawn
+  spawnPlayer(0,true);
+  spawnPlayer(1,false); spawnPlayer(2,false); spawnPlayer(3,false);
+  respawnCore(); crystal.visible=true;
+  buildHUD();
+  document.getElementById('hud').classList.remove('hidden');
+  setTouchUI(true);
+  document.getElementById('start').classList.add('hidden');
+  document.getElementById('end').classList.add('hidden');
+  document.getElementById('spectate').style.display='none';
+  RUNNING=true; timeScale=1;
+  Audio.resume();
+  clock.start();
+  showBanner('GO!', `stage ${code} · last one ticking wins`, 0);
+}
+
+function checkElim(){
+  for(const p of players){
+    if(p.alive && p.time<=0){
+      if(Core.carrier===p) dropCore(p);     // (carriers are frozen, so this is just defensive)
+      p.lives -= 1;
+      if(p.lives<=0){
+        p.alive=false; p.time=0; p.av.g.visible=false; Audio.out();
+        if(p.isHuman){ enterSpectate(); }
+        else showBanner(`${TEAMS[p.team].name} ELIMINATED`, '', 0, TEAMS[p.team].css);
+      } else {
+        respawnPlayer(p); Audio.out();
+        showBanner(`${TEAMS[p.team].name} DOWN`,
+          `${p.lives} ${p.lives===1?'life':'lives'} left`, 0, TEAMS[p.team].css);
+      }
+    }
+  }
+  const alive=players.filter(p=>p.alive);
+  if(alive.length<=1){ endGame(alive[0]); }
+}
+function enterSpectate(){
+  document.getElementById('spectate').style.display='flex';
+}
+function endGame(winner){
+  RUNNING=false;
+  document.getElementById('spectate').style.display='none';
+  const et=document.getElementById('endtitle');
+  const es=document.getElementById('endsub');
+  if(winner){
+    if(winner.isHuman){ et.textContent='YOU WIN'; Audio.win(); }
+    else { et.textContent=`${TEAMS[winner.team].name} WINS`; }
+    et.style.background=`linear-gradient(90deg,${TEAMS[winner.team].css},#fff)`;
+    et.style.webkitBackgroundClip='text'; et.style.backgroundClip='text';
+    es.textContent=`${fmt(winner.time)} left on the clock`;
+  } else { et.textContent='DRAW'; es.textContent='everyone ran out at once'; }
+  const ec=document.getElementById('endseed');
+  if(ec) ec.innerHTML = `stage code <b>${currentSeedCode}</b> — enter it on the next screen to replay this layout`;
+  setTouchUI(false);
+  setTimeout(()=>{ document.getElementById('hud').classList.add('hidden');
+    document.getElementById('end').classList.remove('hidden'); }, 1200);
+}
+
+/* --------- rotation trigger: a CHARACTER (human or AI) touching a side wall rolls the room ---------
+   This is driven by the avatar's contact with the wall in the world, not by the input device. */
+function checkWallTriggers(){
+  if(Rot.active || Rot.cd>0) return;
+  const contact = H - CFG.P_RADIUS - 0.06;   // clamped flush against a side wall = touching it
+  for(const p of players){ if(!p.alive||!p.grounded) continue;
+    if(p.pos.x >=  contact){ triggerRoll(-1); return; }  // touching right wall → rolls it down
+    if(p.pos.x <= -contact){ triggerRoll(+1); return; }  // touching left wall  → rolls it down
+  }
+}
+// surface the glow + arrow on whichever two faces are the side walls right now
+function updateWallCues(){
+  if(Rot.active){ for(const f of faces){ f.glow.visible=false; f.arrow.visible=false; } return; }
+  const ready=(Rot.cd<=0);
+  const pulse=0.5+0.5*Math.sin(performance.now()/240);
+  for(const f of faces){
+    f.anchor.getWorldPosition(_v);
+    const isSide=(_v.y>6 && _v.y<24);     // floor≈0, ceiling≈30, side walls≈15
+    f.glow.visible=isSide; f.arrow.visible=isSide;
+    if(!isSide) continue;
+    f.arrow.scale.x = (_v.x<0) ? 1 : -1;  // mirror the arc so the two walls read as opposite spins
+    if(ready){
+      f.glowMat.color.setHex(0xffd23f); f.glowMat.opacity=0.12+0.16*pulse;
+      f.arrowMat.emissive.setHex(0xfff2c0); f.arrowMat.emissiveIntensity=0.7+0.7*pulse;
+    } else {
+      f.glowMat.color.setHex(0x5b7a99); f.glowMat.opacity=0.05;
+      f.arrowMat.emissive.setHex(0x33414f); f.arrowMat.emissiveIntensity=0.25;
+    }
+  }
+}
+// Fade whichever face is currently the ceiling to ~25% so it doesn't block the view.
+const CEIL_OPACITY = 0.25;
+function setFaceOpacity(f, o){
+  if(f._opacity===o) return; f._opacity=o;
+  const trans=o<1;
+  for(const mat of [f.panel.material, f.trimMat, f.capMat]){
+    mat.transparent=trans; mat.opacity=o; mat.depthWrite=!trans; mat.needsUpdate=true;
+  }
+}
+function updateCeilingFade(){
+  let ceil=null, hy=-1e9;
+  for(const f of faces){ f.anchor.getWorldPosition(_v); if(_v.y>hy){ hy=_v.y; ceil=f; } }
+  for(const f of faces) setFaceOpacity(f, f===ceil ? CEIL_OPACITY : 1.0);
+}
+
+/* ----------------------------- main loop ----------------------------- */
+function tick(){
+  requestAnimationFrame(tick);
+  let dt=Math.min(0.05, clock.getDelta());
+  const simDt=dt*timeScale;
+
+  // animate ambient stuff regardless
+  core.rotation.y+=dt*1.4; core.rotation.x+=dt*0.6;
+  halo.rotation.y-=dt*0.8;
+  const bob=Math.sin(performance.now()/500)*0.18;
+  if(Core.free) crystal.position.y = Core.pos.y + 0; // physics sets it
+  faces.forEach(f=>{ f.emblem.rotation.y+=dt*1.0; f.emblem.position.y=2.0+Math.sin(performance.now()/600)*0.15; });
+
+  if(RUNNING){
+    updateRoll(simDt);
+    updateCamBasis();
+    updateWallCues();
+    updateCeilingFade();
+
+    if(!Rot.active){
+      // timers tick (carrier frozen)
+      for(const p of players){ if(p.alive && Core.carrier!==p) p.time-=simDt; }
+      // low-time tick sound for human
+      const h=players[0];
+      if(h && h.alive && h.time<=10){ lowTickAcc+=simDt; if(lowTickAcc>=1){ lowTickAcc=0; Audio.tick(); } }
+
+      // free core physics
+      if(Core.free){
+        Core.vel.y+=CFG.GRAV*simDt;
+        Core.pos.addScaledVector(Core.vel, simDt);
+        Core.pos.x=Math.max(-H+0.6,Math.min(H-0.6,Core.pos.x));
+        Core.pos.z=Math.max(-L+0.6,Math.min(L-0.6,Core.pos.z));
+        if(Core.pos.y<=1.0){ Core.pos.y=1.0; Core.vel.set(Core.vel.x*0.5,0,Core.vel.z*0.5); }
+        crystal.position.copy(Core.pos);
+        crystal.position.y += bob*0.4;
+      } else if(Core.respawnT>0){
+        Core.respawnT-=simDt; if(Core.respawnT<=0){ respawnCore(); crystal.visible=true; }
+      }
+
+      // AI think on a cadence
+      for(const p of players){ if(p.isHuman||!p.alive) continue;
+        p.aiTick-=simDt; if(p.aiTick<=0){ p.aiTick=DIFFS[DIFF].react; aiThink(p); }
+        aiDrive(p,simDt);
+      }
+
+      // human input → world-space wish direction via camera basis (keyboard and/or touch)
+      const h0=players[0];
+      let wishX=0, wishZ=0, jump=false, push=false;
+      if(h0 && h0.alive){
+        let fwd=0, strafe=0;
+        if(keys['KeyW']||keys['ArrowUp']) fwd+=1;
+        if(keys['KeyS']||keys['ArrowDown']) fwd-=1;
+        if(keys['KeyD']||keys['ArrowRight']) strafe+=1;
+        if(keys['KeyA']||keys['ArrowLeft']) strafe-=1;
+        if(touch.active){ fwd += -touch.dy; strafe += touch.dx; }   // stick up = forward, right = strafe
+        wishX = camFwd.x*fwd + camRight.x*strafe;
+        wishZ = camFwd.z*fwd + camRight.z*strafe;
+        jump = !!keys['Space'] || touch.jumpQueued;
+        push = !!keys['ShiftLeft'] || !!keys['ShiftRight'] || touch.pushHeld;
+      }
+      touch.jumpQueued=false;   // one-shot, consumed each frame
+
+      // update all players (all inputs are world-space direction components)
+      for(const p of players){ if(!p.alive) continue;
+        if(p.isHuman) updatePlayer(p,simDt, wishX,wishZ, jump, push);
+        else updatePlayer(p,simDt, p.aiInput.x, p.aiInput.y, p.aiJump, p.aiPush);
+      }
+
+      // interactions
+      tryPickup();
+      tryScore();
+      checkWallTriggers();
+
+      checkElim();
+    }
+
+    // carried core gentle spin handled by hand anchor; nothing else
+
+    updateCamera(dt);
+    updateHUD();
+
+    // banner fade
+    if(bannerTimer>0){ bannerTimer-=dt; if(bannerTimer<=0 && !Rot.active) hideBanner(); }
+  }
+
+  renderer.render(scene,camera);
+}
+
+/* ----------------------------- UI wiring ----------------------------- */
+document.querySelectorAll('.diff').forEach(d=>{
+  d.addEventListener('click',()=>{ document.querySelectorAll('.diff').forEach(x=>x.classList.remove('on'));
+    d.classList.add('on'); DIFF=d.dataset.d; });
+});
+document.getElementById('playbtn').addEventListener('click',()=>{ Audio.resume(); startGame(); });
+document.getElementById('againbtn').addEventListener('click',()=>{
+  // clear avatars from previous round (may be parented to chamber mid-roll)
+  players.forEach(p=>{ if(p.av.g.parent) p.av.g.parent.remove(p.av.g); });
+  scene.attach(crystal); crystal.visible=true;
+  document.getElementById('end').classList.add('hidden');
+  document.getElementById('start').classList.remove('hidden');
+});
+document.getElementById('skipbtn').addEventListener('click',()=>{ timeScale=4; });
+
+/* ----------------------------- touch controls ----------------------------- */
+// State read by the game loop. On non-touch devices this just stays inert.
+const touch = { moveId:null, active:false, dx:0, dy:0, jumpQueued:false, pushHeld:false };
+function setTouchUI(on){
+  const ui=document.getElementById('touchui'); if(!ui) return;
+  ui.style.display = (on && IS_TOUCH) ? 'block' : 'none';
+  if(!on){ touch.moveId=null; touch.active=false; touch.dx=touch.dy=0; touch.pushHeld=false;
+    const s=document.getElementById('stick'); if(s) s.style.display='none';
+    const b=document.getElementById('pushbtn'); if(b) b.classList.remove('active'); }
+}
+if(IS_TOUCH){
+  document.body.classList.add('touch');
+  const touchpad=document.getElementById('touchpad');
+  const stick=document.getElementById('stick'), nub=document.getElementById('sticknub');
+  const pushbtn=document.getElementById('pushbtn');
+  const STICK_R=58, TAP_MOVE=14, TAP_MS=260;
+  const pad=new Map();   // touch identifier -> {sx,sy,t0,moved}
+  const showStick=(x,y)=>{ stick.style.left=x+'px'; stick.style.top=y+'px';
+    stick.style.display='block'; nub.style.transform='translate(-50%,-50%)'; };
+  const moveNub=(nx,ny)=>{ nub.style.transform=`translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`; };
+  const hideStick=()=>{ stick.style.display='none'; };
+
+  touchpad.addEventListener('touchstart', e=>{
+    for(const t of e.changedTouches) pad.set(t.identifier,{sx:t.clientX,sy:t.clientY,t0:performance.now(),moved:false});
+    e.preventDefault();
+  }, {passive:false});
+  touchpad.addEventListener('touchmove', e=>{
+    for(const t of e.changedTouches){
+      const r=pad.get(t.identifier); if(!r) continue;
+      const dx=t.clientX-r.sx, dy=t.clientY-r.sy;
+      if(!r.moved && Math.hypot(dx,dy)>TAP_MOVE) r.moved=true;          // became a drag
+      if(r.moved && touch.moveId==null){ touch.moveId=t.identifier; showStick(r.sx,r.sy); } // first drag owns the stick
+      if(touch.moveId===t.identifier){
+        const mag=Math.min(STICK_R, Math.hypot(dx,dy)), ang=Math.atan2(dy,dx);
+        const nx=Math.cos(ang)*mag, ny=Math.sin(ang)*mag;
+        touch.dx=nx/STICK_R; touch.dy=ny/STICK_R; touch.active=true; moveNub(nx,ny);
+      }
+    }
+    e.preventDefault();
+  }, {passive:false});
+  const padEnd=e=>{
+    for(const t of e.changedTouches){
+      const r=pad.get(t.identifier); if(!r) continue; pad.delete(t.identifier);
+      if(touch.moveId===t.identifier){ touch.moveId=null; touch.active=false; touch.dx=touch.dy=0; hideStick(); }
+      else if(!r.moved && performance.now()-r.t0 < TAP_MS){ touch.jumpQueued=true; }  // quick stationary touch = jump
+    }
+    e.preventDefault();
+  };
+  touchpad.addEventListener('touchend', padEnd, {passive:false});
+  touchpad.addEventListener('touchcancel', padEnd, {passive:false});
+
+  // dedicated push button (its own element so its touches never reach the move pad)
+  const pdown=e=>{ e.preventDefault(); e.stopPropagation(); touch.pushHeld=true; pushbtn.classList.add('active'); };
+  const pup=e=>{ e.preventDefault(); e.stopPropagation(); touch.pushHeld=false; pushbtn.classList.remove('active'); };
+  pushbtn.addEventListener('touchstart', pdown, {passive:false});
+  pushbtn.addEventListener('touchend', pup, {passive:false});
+  pushbtn.addEventListener('touchcancel', pup, {passive:false});
+}
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.fov = camera.aspect < 1 ? 60 : 52;   // wider vertical FOV for tall portrait screens
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+dispatchEvent(new Event('resize'));            // apply correct FOV/aspect on first load
+
+// hide loading once first frame is ready
+requestAnimationFrame(()=>{ document.getElementById('loading').classList.add('hidden'); });
+tick();
+</script>
+</body>
+</html>
