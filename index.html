@@ -254,6 +254,7 @@ const CFG = {
   SCORE_R: 3.6,
   CRYSTAL_RESPAWN: 1.1,
 };
+const PUSH_COLOR = new THREE.Color(0xff7a1a);   // push flash → ring gradients back to team color
 
 const TEAMS = [
   { name:'RED',    hex:0xff4d5e, css:'#ff4d5e' },
@@ -646,6 +647,7 @@ function buildAvatar(team){
   const ringMat=new THREE.MeshBasicMaterial({color:team.hex, transparent:true, opacity:0.5, depthWrite:false});
   const cring=new THREE.Mesh(new THREE.RingGeometry(0.72,0.95,28), ringMat);
   cring.rotation.x=-Math.PI/2; cring.position.y=0.03; g.add(cring);
+  cring.userData.base=new THREE.Color(team.hex);   // resting color; flashes PUSH_COLOR on push
   // hand anchor for carried core
   const hand=new THREE.Object3D(); hand.position.set(0,2.7,0.1); g.add(hand);
 
@@ -983,7 +985,7 @@ function flashBase(f,color){
 function doPush(p){
   if(p.pushCd>0) return;
   p.pushCd=CFG.PUSH_CD; Audio.push();
-  p.squash=0.85;
+  p.squash=0.7;
   for(const t of players){ if(t===p||!t.alive) continue;
     if(!t.grounded) continue;                 // airborne immune
     const to=new THREE.Vector3(t.pos.x-p.pos.x,0,t.pos.z-p.pos.z);
@@ -1049,6 +1051,10 @@ function updatePlayer(p, dt, inputX, inputZ, jump, push){
   // lean forward slightly when moving
   const moving=Math.hypot(p.vel.x,p.vel.z)>1.5;
   p.av.body.rotation.x += ((moving?0.18:0) - p.av.body.rotation.x)*Math.min(1,dt*8);
+  // push indicator: ring flashes PUSH_COLOR then gradients back to team color over the cooldown
+  const cdT = CFG.PUSH_CD>0 ? Math.max(0, p.pushCd/CFG.PUSH_CD) : 0;
+  p.av.cring.material.color.lerpColors(p.av.cring.userData.base, PUSH_COLOR, cdT);
+  p.av.cring.material.opacity = 0.5 + 0.45*cdT;
 }
 
 /* ----------------------------- HUD ----------------------------- */
