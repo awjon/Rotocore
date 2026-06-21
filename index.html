@@ -880,7 +880,7 @@ function aiThink(p){
   } else if(Core.carrier && Core.carrier!==p){
     const c=Core.carrier;
     const dist=p.pos.distanceTo(c.pos);
-    if(dist<14 && Math.random()<D.pushChance+0.2){
+    if(dist<40 && Math.random()<D.pushChance+0.2){
       p.aiState='chase'; p.aiTarget.copy(c.pos);
       if(dist<CFG.PUSH_RANGE*0.92 && p.pushCd<=0) p.aiPush=true;
     } else {
