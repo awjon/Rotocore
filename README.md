@@ -137,7 +137,10 @@ hard:   { speed:1.0,  pushChance:0.85, dodge:0.8,  smartRotate:true,  react:0.12
 Single file, one module script. Roughly in order:
 
 - **`CFG` / `TEAMS` / `BASE_ANGLES`** — all tunables and the four team colors/spawn faces.
-- **Audio** — tiny procedural WebAudio (klaxon, slam, score stings, low-time tick). No audio files.
+- **Audio** — tiny procedural WebAudio for SFX (klaxon, slam, score stings, low-time tick).
+- **Music** — looping background playlist of arcade tracks in `audio/` (`bgm-1..3.mp3`), with a
+  one-shot `victory.mp3` sting on a human win. Starts on ENTER, toggled by the ♪ mute button
+  (persisted to `localStorage`).
 - **Renderer/scene** — `PCFSoftShadowMap`, ACES tone mapping, fog, one shadow-casting key light
   plus hemisphere + fill. One point light (on the core) to keep the light count low.
 - **Chamber** — a `Group` whose pivot sits on the tube's central axis (`y = 15`). Four decorated

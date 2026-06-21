@@ -111,6 +111,11 @@
     border-radius:9px;padding:7px 14px;cursor:pointer;font-family:inherit;font-size:13px}
   #loading{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
     background:#070a12;color:#8fa6c4;letter-spacing:3px;font-size:14px}
+  #mutebtn{position:fixed;top:10px;right:12px;z-index:100;width:38px;height:38px;border-radius:10px;
+    border:1px solid var(--line);background:rgba(13,20,33,.72);color:#cfe2ff;font-size:18px;line-height:1;
+    cursor:pointer;backdrop-filter:blur(6px);pointer-events:auto;font-family:inherit}
+  #mutebtn:hover{border-color:#6ea0ff;color:#fff}
+  #mutebtn.muted{color:#5b6b85;border-color:#243047}
   .hidden{display:none!important}
   /* ---------- touch controls ---------- */
   #touchui{display:none}
@@ -213,6 +218,11 @@
 </div>
 
 <div id="loading">BUILDING THE CHAMBER…</div>
+
+<!-- Background music (looping arcade playlist) + victory sting. Managed by the Music controller. -->
+<audio id="bgm" preload="none"></audio>
+<audio id="victorymusic" preload="auto" src="audio/victory.mp3"></audio>
+<button id="mutebtn" title="Toggle music" aria-label="Toggle music">♪</button>
 
 <script type="importmap">
 { "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js" } }
@@ -319,6 +329,36 @@ const Audio = (()=>{
     out(){ ensure(); [330,247,165].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'sawtooth',0.2),i*120)); },
     win(){ ensure(); [523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'triangle',0.25),i*120)); },
   };
+})();
+
+/* Looping background music (real mp3s) layered over the procedural SFX above.
+   Sequential playlist that wraps forever; victory sting plays on a human win. */
+const Music = (()=>{
+  const bgm=document.getElementById('bgm');
+  const vic=document.getElementById('victorymusic');
+  const btn=document.getElementById('mutebtn');
+  const PLAYLIST=['audio/bgm-1.mp3','audio/bgm-2.mp3','audio/bgm-3.mp3'];
+  let idx=0, primed=false;
+  let muted = localStorage.getItem('rotocore_muted')==='1';
+  bgm.volume=0.4; vic.volume=0.6;
+  bgm.muted=muted; vic.muted=muted;
+  // advance through the playlist and loop back to the top
+  bgm.addEventListener('ended', ()=>{ idx=(idx+1)%PLAYLIST.length; bgm.src=PLAYLIST[idx]; bgm.play().catch(()=>{}); });
+  function paintBtn(){ btn.textContent = muted?'🔇':'🎵'; btn.classList.toggle('muted',muted); }
+  // resume the background loop (call from a user gesture so autoplay is allowed)
+  function start(){
+    vic.pause();
+    if(!primed){ primed=true; idx=0; bgm.src=PLAYLIST[0]; }
+    bgm.play().catch(()=>{});
+  }
+  // human victory: stop the loop and play the sting once
+  function victory(){ bgm.pause(); vic.currentTime=0; vic.play().catch(()=>{}); }
+  btn.addEventListener('click',()=>{
+    muted=!muted; localStorage.setItem('rotocore_muted', muted?'1':'0');
+    bgm.muted=muted; vic.muted=muted; paintBtn();
+  });
+  paintBtn();
+  return { start, victory };
 })();
 
 /* ----------------------------- renderer ----------------------------- */
@@ -1170,7 +1210,7 @@ function endGame(winner){
   const et=document.getElementById('endtitle');
   const es=document.getElementById('endsub');
   if(winner){
-    if(winner.isHuman){ et.textContent='YOU WIN'; Audio.win(); }
+    if(winner.isHuman){ et.textContent='YOU WIN'; Audio.win(); Music.victory(); }
     else { et.textContent=`${TEAMS[winner.team].name} WINS`; }
     et.style.background=`linear-gradient(90deg,${TEAMS[winner.team].css},#fff)`;
     et.style.webkitBackgroundClip='text'; et.style.backgroundClip='text';
@@ -1321,13 +1361,14 @@ document.querySelectorAll('.diff').forEach(d=>{
   d.addEventListener('click',()=>{ document.querySelectorAll('.diff').forEach(x=>x.classList.remove('on'));
     d.classList.add('on'); DIFF=d.dataset.d; });
 });
-document.getElementById('playbtn').addEventListener('click',()=>{ Audio.resume(); startGame(); });
+document.getElementById('playbtn').addEventListener('click',()=>{ Audio.resume(); Music.start(); startGame(); });
 document.getElementById('againbtn').addEventListener('click',()=>{
   // clear avatars from previous round (may be parented to chamber mid-roll)
   players.forEach(p=>{ if(p.av.g.parent) p.av.g.parent.remove(p.av.g); });
   scene.attach(crystal); crystal.visible=true;
   document.getElementById('end').classList.add('hidden');
   document.getElementById('start').classList.remove('hidden');
+  Music.start();   // resume the loop after a victory sting / on returning to the menu
 });
 document.getElementById('skipbtn').addEventListener('click',()=>{ timeScale=4; });
 
