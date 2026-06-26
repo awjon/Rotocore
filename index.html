@@ -68,6 +68,9 @@
     text-shadow:0 4px 30px rgba(0,0,0,.6);transition:opacity .15s;text-align:center}
   #subbanner{position:absolute;top:53%;left:50%;transform:translateX(-50%);font-size:16px;
     letter-spacing:2px;opacity:0;transition:opacity .2s;color:#cfe2ff}
+  #pwrtext{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
+    font-size:30px;font-weight:900;letter-spacing:2px;color:#e6edf6;opacity:0;
+    text-shadow:0 3px 20px rgba(0,0,0,.6);transition:opacity .15s;text-align:center}
 
   #vignette{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;
     box-shadow:inset 0 0 220px 40px rgba(255,170,40,.55)}
@@ -162,6 +165,7 @@
   </div>
   <div id="banner"></div>
   <div id="subbanner"></div>
+  <div id="pwrtext"></div>
   <div id="vignette"></div>
 </div>
 
@@ -263,8 +267,24 @@ const CFG = {
   PICKUP_R: 1.7,
   SCORE_R: 3.6,
   CRYSTAL_RESPAWN: 1.1,
+  POWER_DUR: 6,           // timed power-ups last this long (s)
+  POWER_SPEED: 1.3,       // Super Speed movement multiplier
+  POWER_JUMP: 1.3,        // Super Jump velocity multiplier
+  POWER_SPAWN_MIN: 15,    // seconds between a pickup and the next spawn (min)
+  POWER_SPAWN_MAX: 25,    // …and max
+  POWER_FIRST: 12,        // first power-up appears this many seconds into a match
+  POWER_SEEK_R: 7,        // AI grabs a power-up only within this radius (and closer than the core)
 };
 const PUSH_COLOR = new THREE.Color(0xff7a1a);   // push flash → ring gradients back to team color
+// Power-up catalog: one shape (icosahedron), distinct color per type; name shown on pickup.
+const POWERS = {
+  shield: { name:'INVULNERABLE',    color:0xeef2fa },
+  speed:  { name:'SUPER SPEED',     color:0x6affc0 },
+  jump:   { name:'SUPER JUMP',      color:0xffe26a },
+  freeze: { name:'TIMER FREEZE',    color:0x6a6cff },
+  rotate: { name:'RANDOM ROTATION', color:0xc98bff, once:true },
+  reset:  { name:'CORE RESPAWN',    color:0xff8ad0, once:true },
+};
 
 const TEAMS = [
   { name:'RED',    hex:0xff4d5e, css:'#ff4d5e' },
@@ -595,7 +615,8 @@ function applyStageSeed(code){
 // far end cap: solid backdrop for depth (camera always views from +Z side)
 const capMat = new THREE.MeshStandardMaterial({ map:wallTex, roughness:0.9, metalness:0.1, side:THREE.DoubleSide });
 const farCap=new THREE.Mesh(new THREE.PlaneGeometry(faceWide+2, faceWide+2), capMat);
-farCap.position.set(0,H,-(L+0.2)); farCap.receiveShadow=true; scene.add(farCap);
+// parented to the chamber (local y=0 since chamber sits at y=H) so it rolls with the room
+farCap.position.set(0,0,-(L+0.2)); farCap.receiveShadow=true; chamber.add(farCap);
 // near end: open frame (so it doesn't occlude the view), reads as the room's rim
 const frameMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4});
 const frameTopMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4,
@@ -657,6 +678,40 @@ function respawnCore(){
 }
 respawnCore();
 
+/* ----------------------------- power-ups ----------------------------- */
+// One reusable mesh (recolored per spawn). Distinct icosahedron so it reads as "not the core".
+const powerMat = new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0xffffff,
+  emissiveIntensity:1.1, roughness:0.2, metalness:0.3 });
+const powerGroup = new THREE.Group();
+const powerCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), powerMat);
+powerCore.castShadow=true; powerGroup.add(powerCore);
+const powerHalo = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 0),
+  new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.16, depthWrite:false }));
+powerGroup.add(powerHalo);
+const powerLight = new THREE.PointLight(0xffffff, 2.0, 18, 2.0);
+powerGroup.add(powerLight);
+powerGroup.visible=false; scene.add(powerGroup);
+
+const Power = { type:null, active:false, pos:new THREE.Vector3(), spawnT:CFG.POWER_FIRST };
+function spawnPower(){
+  const keys=Object.keys(POWERS);
+  Power.type=keys[Math.floor(Math.random()*keys.length)];
+  // random corner, well away from the middle/base
+  const sx=Math.random()<0.5?-1:1, sz=Math.random()<0.5?-1:1;
+  const x=sx*(H-2.8-Math.random()*1.5);
+  const z=sz*(L-2.8-Math.random()*1.5);
+  Power.pos.set(x, 1.4, z);
+  const c=POWERS[Power.type].color;
+  powerMat.color.setHex(c); powerMat.emissive.setHex(c);
+  powerHalo.material.color.setHex(c); powerLight.color.setHex(c);
+  powerGroup.position.copy(Power.pos); powerGroup.visible=true;
+  Power.active=true;
+}
+function clearPower(reschedule){
+  Power.active=false; powerGroup.visible=false; Power.type=null;
+  if(reschedule) Power.spawnT = CFG.POWER_SPAWN_MIN + Math.random()*(CFG.POWER_SPAWN_MAX-CFG.POWER_SPAWN_MIN);
+}
+
 /* ----------------------------- player factory ----------------------------- */
 function buildAvatar(team){
   const g=new THREE.Group();
@@ -709,6 +764,7 @@ function spawnPlayer(teamIndex, isHuman){
     stun:0, pushCd:0, squash:1, pendingTumbleStun:false, reparented:false,
     aiTick:0, aiTarget:new THREE.Vector3(), aiState:'idle', aiInput:new THREE.Vector2(),
     aiJump:false, aiPush:false,
+    power:{shield:0, speed:0, jump:0, freeze:0},   // timed power-up countdowns (s)
   };
   av.g.position.copy(p.pos);
   players.push(p);
@@ -719,6 +775,7 @@ function respawnPlayer(p){
   p.time=CFG.START_TIME;
   p.pos.copy(SPAWN_SPOTS[p.team]); p.pos.y=2.2;
   p.vel.set(0,0,0); p.stun=0; p.grounded=false; p.pendingTumbleStun=false;
+  p.power.shield=p.power.speed=p.power.jump=p.power.freeze=0;   // lose active power-ups on death
   p.av.g.visible=true; p.av.g.position.copy(p.pos);
   p.av.g.rotation.set(0, Math.atan2(p.facing.x,p.facing.z), 0);
 }
@@ -745,6 +802,8 @@ function triggerRoll(dir){
   if(Rot.active || Rot.cd>0) return;
   const alive=players.filter(p=>p.alive);
   Audio.klaxon();
+  if(Power.active) clearPower(true);   // a power-up on the old floor would end up stuck to a wall
+
   // parent all alive players + free core to chamber so they ride the spin
   for(const p of alive){ chamber.attach(p.av.g); p.reparented=true; }
   if(Core.free){ chamber.attach(crystal); Core.reparented=true; } else Core.reparented=false;
@@ -897,6 +956,14 @@ function aiThink(p){
   p.aiPush=false;
   const ff=floorFace();
   const activeOwner = ff ? ff.owner : -1;
+  // opportunistic power-up grab: only if it's clearly within reach and closer than the core,
+  // and never while carrying the core (delivering stays the priority).
+  if(Power.active && Core.carrier!==p){
+    const dp=Math.hypot(p.pos.x-Power.pos.x, p.pos.z-Power.pos.z);
+    const dc=Core.free ? Math.hypot(p.pos.x-Core.pos.x, p.pos.z-Core.pos.z)
+            : (Core.carrier ? Math.hypot(p.pos.x-Core.carrier.pos.x, p.pos.z-Core.carrier.pos.z) : Infinity);
+    if(dp < CFG.POWER_SEEK_R && dp < dc){ p.aiState='power'; p.aiTarget.copy(Power.pos); return; }
+  }
   if(Core.carrier===p){
     // I'm carrying
     if(activeOwner===p.team){
@@ -985,6 +1052,26 @@ function giveCore(p){
   Core.carrier=p; Core.free=false; Audio.pickup();
   p.av.hand.add(crystal); crystal.position.set(0,0,0);
 }
+function tryPickupPower(){
+  if(!Power.active) return;
+  for(const p of players){ if(!p.alive) continue;
+    const d=Math.hypot(p.pos.x-Power.pos.x, p.pos.z-Power.pos.z);
+    const dy=Math.abs((p.pos.y+1.0)-Power.pos.y);
+    if(d<CFG.PICKUP_R+0.3 && dy<2.6){
+      const t=Power.type;
+      clearPower(true);                 // remove + schedule next (before applyPower so a rotate's despawn is a no-op)
+      applyPower(p, t);
+      return;
+    }
+  }
+}
+function applyPower(p, t){
+  Audio.pickup();
+  if(t==='shield'||t==='speed'||t==='jump'||t==='freeze'){ p.power[t]=CFG.POWER_DUR; }
+  else if(t==='rotate'){ Rot.cd=0; triggerRoll(Math.random()<0.5?-1:1); }   // roll the room, no wall needed
+  else if(t==='reset'){ respawnCore(); crystal.visible=true; }             // yank the core & re-drop it fresh
+  showPower(POWERS[t].name);
+}
 function dropCore(p, impulse){
   if(Core.carrier!==p) return;
   scene.attach(crystal);
@@ -1028,6 +1115,7 @@ function doPush(p){
   p.squash=0.7;
   for(const t of players){ if(t===p||!t.alive) continue;
     if(!t.grounded) continue;                 // airborne immune
+    if(t.power.shield>0) continue;            // INVULNERABLE power-up: immune to pushes
     const to=new THREE.Vector3(t.pos.x-p.pos.x,0,t.pos.z-p.pos.z);
     const dist=to.length(); if(dist>CFG.PUSH_RANGE) continue;
     to.normalize();
@@ -1046,9 +1134,11 @@ function updatePlayer(p, dt, inputX, inputZ, jump, push){
   if(!p.alive) return;
   if(p.stun>0) p.stun-=dt;
   if(p.pushCd>0) p.pushCd-=dt;
+  for(const k in p.power){ if(p.power[k]>0) p.power[k]=Math.max(0,p.power[k]-dt); }   // tick power-up timers
 
   const carrying = (Core.carrier===p);
-  const speed = CFG.MOVE * (carrying?CFG.CARRY_MOVE_MULT:1) * (p.isHuman?1:(p._aiSpeed||1));
+  const speed = CFG.MOVE * (carrying?CFG.CARRY_MOVE_MULT:1) * (p.isHuman?1:(p._aiSpeed||1))
+              * (p.power.speed>0?CFG.POWER_SPEED:1);   // SUPER SPEED
   const canControl = p.stun<=0;
 
   if(canControl && (Math.abs(inputX)>0.01 || Math.abs(inputZ)>0.01)){
@@ -1064,7 +1154,7 @@ function updatePlayer(p, dt, inputX, inputZ, jump, push){
     p.vel.x *= Math.pow(0.0001,dt); p.vel.z *= Math.pow(0.0001,dt);
   }
 
-  if(jump && p.grounded && canControl){ p.vel.y=CFG.JUMP_V; p.grounded=false; Audio.jump(); p.squash=1.35; }
+  if(jump && p.grounded && canControl){ p.vel.y=CFG.JUMP_V*(p.power.jump>0?CFG.POWER_JUMP:1); p.grounded=false; Audio.jump(); p.squash=1.35; }
   if(push && canControl) doPush(p);
 
   // integrate
@@ -1148,6 +1238,9 @@ function showBanner(txt, sub, hold, color){
   bannerTimer=1.1;
 }
 function hideBanner(){ bannerEl.style.opacity=0; subEl.style.opacity=0; }
+const pwrEl=document.getElementById('pwrtext');
+let pwrTimer=0;
+function showPower(name){ pwrEl.textContent=name; pwrEl.style.opacity=1; pwrTimer=1.4; }
 const vigEl=document.getElementById('vignette');
 function setVignette(v){ vigEl.style.opacity=v; }
 
@@ -1159,6 +1252,7 @@ function startGame(){
   // reset
   players.length=0;
   Rot.active=false; Rot.cd=0;
+  clearPower(false); Power.spawnT=CFG.POWER_FIRST;   // no leftover power-up; first appears POWER_FIRST in
   // resolve the stage code (blank = fresh random), build its obstacles, get its starting floor
   const typed=(document.getElementById('seedinput').value||'').trim().toUpperCase();
   const code = typed.length ? typed : randomSeedCode();
@@ -1277,9 +1371,13 @@ function tick(){
   // animate ambient stuff regardless
   core.rotation.y+=dt*1.4; core.rotation.x+=dt*0.6;
   halo.rotation.y-=dt*0.8;
+  // keep the core a symmetric octahedron: cancel the carrier's squash scale while held, identity when free
+  if(Core.carrier){ const s=Core.carrier.squash; crystal.scale.set(Math.sqrt(s),1/s,Math.sqrt(s)); }
+  else crystal.scale.set(1,1,1);
   const bob=Math.sin(performance.now()/500)*0.18;
   if(Core.free) crystal.position.y = Core.pos.y + 0; // physics sets it
   faces.forEach(f=>{ f.emblem.rotation.y+=dt*1.0; f.emblem.position.y=2.0+Math.sin(performance.now()/600)*0.15; });
+  if(Power.active){ powerGroup.rotation.y+=dt*1.6; powerGroup.position.y=Power.pos.y+bob; }   // spin/bob the power-up
 
   if(RUNNING){
     updateRoll(simDt);
@@ -1289,7 +1387,7 @@ function tick(){
 
     if(!Rot.active){
       // timers tick (carrier frozen)
-      for(const p of players){ if(p.alive && Core.carrier!==p) p.time-=simDt; }
+      for(const p of players){ if(p.alive && Core.carrier!==p && p.power.freeze<=0) p.time-=simDt; }
       // low-time tick sound for human
       const h=players[0];
       if(h && h.alive && h.time<=10){ lowTickAcc+=simDt; if(lowTickAcc>=1){ lowTickAcc=0; Audio.tick(); } }
@@ -1306,6 +1404,9 @@ function tick(){
       } else if(Core.respawnT>0){
         Core.respawnT-=simDt; if(Core.respawnT<=0){ respawnCore(); crystal.visible=true; }
       }
+
+      // power-up spawn cadence: one at a time, in a random corner
+      if(!Power.active){ Power.spawnT-=simDt; if(Power.spawnT<=0) spawnPower(); }
 
       // AI think on a cadence
       for(const p of players){ if(p.isHuman||!p.alive) continue;
@@ -1338,6 +1439,7 @@ function tick(){
 
       // interactions
       tryPickup();
+      tryPickupPower();
       tryScore();
       checkWallTriggers();
 
@@ -1351,6 +1453,7 @@ function tick(){
 
     // banner fade
     if(bannerTimer>0){ bannerTimer-=dt; if(bannerTimer<=0 && !Rot.active) hideBanner(); }
+    if(pwrTimer>0){ pwrTimer-=dt; if(pwrTimer<=0) pwrEl.style.opacity=0; }
   }
 
   renderer.render(scene,camera);
