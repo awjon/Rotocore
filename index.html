@@ -278,10 +278,10 @@ const CFG = {
 const PUSH_COLOR = new THREE.Color(0xff7a1a);   // push flash → ring gradients back to team color
 // Power-up catalog: one shape (icosahedron), distinct color per type; name shown on pickup.
 const POWERS = {
-  shield: { name:'INVULNERABLE',    color:0x6ad1ff },
+  shield: { name:'INVULNERABLE',    color:0xeef2fa },
   speed:  { name:'SUPER SPEED',     color:0x6affc0 },
   jump:   { name:'SUPER JUMP',      color:0xffe26a },
-  freeze: { name:'TIMER FREEZE',    color:0x9fb4ff },
+  freeze: { name:'TIMER FREEZE',    color:0x6a6cff },
   rotate: { name:'RANDOM ROTATION', color:0xc98bff, once:true },
   reset:  { name:'CORE RESPAWN',    color:0xff8ad0, once:true },
 };
@@ -615,7 +615,8 @@ function applyStageSeed(code){
 // far end cap: solid backdrop for depth (camera always views from +Z side)
 const capMat = new THREE.MeshStandardMaterial({ map:wallTex, roughness:0.9, metalness:0.1, side:THREE.DoubleSide });
 const farCap=new THREE.Mesh(new THREE.PlaneGeometry(faceWide+2, faceWide+2), capMat);
-farCap.position.set(0,H,-(L+0.2)); farCap.receiveShadow=true; scene.add(farCap);
+// parented to the chamber (local y=0 since chamber sits at y=H) so it rolls with the room
+farCap.position.set(0,0,-(L+0.2)); farCap.receiveShadow=true; chamber.add(farCap);
 // near end: open frame (so it doesn't occlude the view), reads as the room's rim
 const frameMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4});
 const frameTopMat=new THREE.MeshStandardMaterial({color:0x1b2433, roughness:0.7, metalness:0.4,
@@ -1370,6 +1371,9 @@ function tick(){
   // animate ambient stuff regardless
   core.rotation.y+=dt*1.4; core.rotation.x+=dt*0.6;
   halo.rotation.y-=dt*0.8;
+  // keep the core a symmetric octahedron: cancel the carrier's squash scale while held, identity when free
+  if(Core.carrier){ const s=Core.carrier.squash; crystal.scale.set(Math.sqrt(s),1/s,Math.sqrt(s)); }
+  else crystal.scale.set(1,1,1);
   const bob=Math.sin(performance.now()/500)*0.18;
   if(Core.free) crystal.position.y = Core.pos.y + 0; // physics sets it
   faces.forEach(f=>{ f.emblem.rotation.y+=dt*1.0; f.emblem.position.y=2.0+Math.sin(performance.now()/600)*0.15; });
